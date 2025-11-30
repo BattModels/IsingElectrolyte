@@ -32,9 +32,12 @@ dev = [
   "pytest",
 ]
 
-[project.scripts]
-# command name = "module:function"
-electrolyte-analysis = "electrolyte_tools.cli:main"
-
 [project.urls]
-repository=
+repository="https://github.com/hancheng2000/IsingLHCE.git"
+issues="https://github.com/hancheng2000/IsingLHCE/issues"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
