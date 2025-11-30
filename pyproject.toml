@@ -22,7 +22,6 @@ dependencies = [
   "scipy",
   "matplotlib",
   "jaxopt",
-  "pickle",
   "scikit-learn",
   "tqdm",
 ]
