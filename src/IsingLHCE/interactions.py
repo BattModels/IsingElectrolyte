@@ -72,8 +72,8 @@ def sol_sol_func(X, params):
     function computing solvent-solvent interaction.
     """
     dn, an = X
-    L0, H0, a0, a1, a2, s = params
-    output = L0 + H0 / (1.0 + jnp.exp(s * (a0 + a1 * dn + a2 * an)))
+    L0, H0, a0, a1, a2 = params
+    output = L0 + H0 / (1.0 + jnp.exp(a0 + a1 * dn + a2 * an))
     return output
 
 @jax.jit
