@@ -10,8 +10,12 @@ from .conc_vol_correction import conc_factor_sep_x_v_sigmoid
 jax.config.update("jax_enable_x64", True)
 jax.config.update("jax_disable_jit", False)
 
+# ---------------------------------------------------------------------------
+# Legacy fixed-species functions (2 solvents + 1 anion)
+# ---------------------------------------------------------------------------
+
 @jax.jit
-def rescale_input_params(input_params):
+def rescale_input_params_old(input_params):
     """
     Rescale input parameters to ensure monotonicity
     """
@@ -71,9 +75,9 @@ def rescale_input_params(input_params):
     input_params["conc_factor_sol"] = conc_factor_sol
     return input_params
 
-def energetics(vars, input_params, input_constants, kT = 0.0257):
+def energetics_old(vars, input_params, input_constants, kT = 0.0257):
     # Rescale input parameters to ensure monotonicity
-    input_params = rescale_input_params(input_params)
+    input_params = rescale_input_params_old(input_params)
     # Unpack input parameters.
     sol_params_dn_tmp = input_params["sol_params_dn"]
     salt_params_dn_tmp = input_params["salt_params_dn"]
@@ -173,8 +177,8 @@ def energetics(vars, input_params, input_constants, kT = 0.0257):
 
     return h, J, avg_m, avg_n, avg_l, kT, z
 
-def equations(vars, input_params, input_constants):
-    h, J, avg_m, avg_n, avg_l, kT, z = energetics(vars, input_params, input_constants)
+def equations_old(vars, input_params, input_constants):
+    h, J, avg_m, avg_n, avg_l, kT, z = energetics_old(vars, input_params, input_constants)
     exp0 = jnp.exp(
         -(
             h[0]
@@ -208,9 +212,10 @@ def equations(vars, input_params, input_constants):
     f2 = exp1 / partition - avg_n
     return jnp.array([f1, f2, f3])
 
-BROYDEN_SOLVER = Broyden(fun=equations, maxiter=1000, tol=1e-8, verbose=False, jit=True)
+BROYDEN_SOLVER_OLD = Broyden(fun=equations_old, maxiter=1000, tol=1e-8, verbose=False, jit=True)
+
 @partial(jax.jit, static_argnames=("max_tries",))
-def find_root(input_params, input_constants,
+def find_root_old(input_params, input_constants,
               initial_guess=jnp.array([0.5, 0.0, 0.5]),
               max_tries=10):
 
@@ -235,7 +240,7 @@ def find_root(input_params, input_constants,
             return best_sol, found_valid
 
         def do_solve(_):
-            sol = BROYDEN_SOLVER.run(
+            sol = BROYDEN_SOLVER_OLD.run(
                 guess,
                 input_params=input_params,
                 input_constants=input_constants,
@@ -270,19 +275,19 @@ def find_root(input_params, input_constants,
     return final_sol, found_valid
 
 
-def get_root_error(avg_m, avg_n, avg_l, input_params, input_constants):
+def get_root_error_old(avg_m, avg_n, avg_l, input_params, input_constants):
     """
     Get the error of the root by comparing f(n)-n with 0
     """
     vars = jnp.array([avg_m, avg_n, avg_l])
-    f1, f2, f3 = equations(vars, input_params, input_constants)
+    f1, f2, f3 = equations_old(vars, input_params, input_constants)
     return jnp.array([f1, f2, f3])
 
 
 @jax.jit
-def li_free_energy(input_params, input_constants):
-    (avg_m, avg_n, avg_l), _ = find_root(input_params, input_constants, initial_guess=jnp.array([0.5, 0.0, 0.5]))
-    h, J, _, _, _, kT, z = energetics(
+def li_free_energy_old(input_params, input_constants):
+    (avg_m, avg_n, avg_l), _ = find_root_old(input_params, input_constants, initial_guess=jnp.array([0.5, 0.0, 0.5]))
+    h, J, _, _, _, kT, z = energetics_old(
         jnp.array([avg_m, avg_n, avg_l]), input_params, input_constants
     )
      # Free energy calculation
@@ -318,10 +323,10 @@ def _species_props_to_arrays(solvents, anions):
 
 
 @jax.jit
-def rescale_input_params_generic(input_params):
+def rescale_input_params(input_params):
     """Rescale parameters for the generic multi-species model.
 
-    Identical to rescale_input_params except that it handles
+    Identical to rescale_input_params_old except that it handles
     params_anion_anion (6 elements, sol_sol_func form) instead of
     params_salt (5 elements, expfunc form).
     """
@@ -381,7 +386,7 @@ def rescale_input_params_generic(input_params):
     return input_params
 
 
-def energetics_generic(vars, input_params, dn_sol, an_sol, x_sol, v_sol, dn_an, x_an, v_an, z):
+def energetics(vars, input_params, dn_sol, an_sol, x_sol, v_sol, dn_an, x_an, v_an, z):
     """Compute h and J for a generic N-solvent + M-anion Ising model.
 
     Args:
@@ -404,7 +409,7 @@ def energetics_generic(vars, input_params, dn_sol, an_sol, x_sol, v_sol, dn_an, 
         kT:  thermal energy (scalar)
     """
     kT = 0.0257
-    input_params = rescale_input_params_generic(input_params)
+    input_params = rescale_input_params(input_params)
 
     sol_params_dn_tmp      = input_params["sol_params_dn"]
     salt_params_dn_tmp     = input_params["salt_params_dn"]
@@ -503,14 +508,14 @@ def energetics_generic(vars, input_params, dn_sol, an_sol, x_sol, v_sol, dn_an, 
     return h, J, kT
 
 
-def equations_generic(vars, input_params, dn_sol, an_sol, x_sol, v_sol, dn_an, x_an, v_an, z):
+def equations(vars, input_params, dn_sol, an_sol, x_sol, v_sol, dn_an, x_an, v_an, z):
     """Mean-field self-consistency equations for N-solvent + M-anion Ising model.
 
     Returns residuals f_i = exp_i / Z - vars_i for each species i.
-    Generalizes equations() using the identity:
+    Generalizes equations_old() using the identity:
         energy_i = h[i] + z/2 * ((J @ vars)[i] + J[i,i] * vars[i])
     """
-    h, J, kT = energetics_generic(
+    h, J, kT = energetics(
         vars, input_params, dn_sol, an_sol, x_sol, v_sol, dn_an, x_an, v_an, z
     )
     energies = -(h + (z / 2.0) * (J @ vars + jnp.diag(J) * vars)) / kT
@@ -518,13 +523,13 @@ def equations_generic(vars, input_params, dn_sol, an_sol, x_sol, v_sol, dn_an, x
     return exps / jnp.sum(exps) - vars
 
 
-BROYDEN_SOLVER_GENERIC = Broyden(
-    fun=equations_generic, maxiter=1000, tol=1e-8, verbose=False, jit=True
+BROYDEN_SOLVER = Broyden(
+    fun=equations, maxiter=1000, tol=1e-8, verbose=False, jit=True
 )
 
 
 @partial(jax.jit, static_argnames=("max_tries",))
-def _find_root_generic_impl(
+def _find_root_impl(
     input_params, dn_sol, an_sol, x_sol, v_sol, dn_an, x_an, v_an, z,
     initial_guess, max_tries,
 ):
@@ -551,7 +556,7 @@ def _find_root_generic_impl(
             return best_sol, found_valid
 
         def do_solve(_):
-            sol = BROYDEN_SOLVER_GENERIC.run(
+            sol = BROYDEN_SOLVER.run(
                 guess,
                 input_params=input_params,
                 dn_sol=dn_sol, an_sol=an_sol, x_sol=x_sol, v_sol=v_sol,
@@ -581,7 +586,7 @@ def _find_root_generic_impl(
     return final_sol, found_valid
 
 
-def find_root_generic(input_params, solvents, anions, z, initial_guess=None, max_tries=10):
+def find_root(input_params, solvents, anions, z, initial_guess=None, max_tries=10):
     """Multi-start root solver for the generic N-solvent + M-anion Ising model.
 
     Args:
@@ -599,21 +604,21 @@ def find_root_generic(input_params, solvents, anions, z, initial_guess=None, max
     n_species = len(solvents) + len(anions)
     if initial_guess is None:
         initial_guess = jnp.ones(n_species) / n_species
-    return _find_root_generic_impl(
+    return _find_root_impl(
         input_params, dn_sol, an_sol, x_sol, v_sol, dn_an, x_an, v_an, z,
         initial_guess, max_tries,
     )
 
 
-def get_root_error_generic(vars, input_params, solvents, anions, z):
+def get_root_error(vars, input_params, solvents, anions, z):
     """Diagnostic: returns mean-field equation residuals for given occupation fractions."""
     dn_sol, an_sol, x_sol, v_sol, dn_an, x_an, v_an = _species_props_to_arrays(solvents, anions)
-    return equations_generic(
+    return equations(
         vars, input_params, dn_sol, an_sol, x_sol, v_sol, dn_an, x_an, v_an, z
     )
 
 
-def li_free_energy_generic(input_params, solvents, anions, z):
+def li_free_energy(input_params, solvents, anions, z):
     """Li+ solvation free energy for a generic N-solvent + M-anion system.
 
     Args:
@@ -628,11 +633,11 @@ def li_free_energy_generic(input_params, solvents, anions, z):
     dn_sol, an_sol, x_sol, v_sol, dn_an, x_an, v_an = _species_props_to_arrays(solvents, anions)
     n_species = len(solvents) + len(anions)
     initial_guess = jnp.ones(n_species) / n_species
-    vars, _ = _find_root_generic_impl(
+    vars, _ = _find_root_impl(
         input_params, dn_sol, an_sol, x_sol, v_sol, dn_an, x_an, v_an, z,
         initial_guess, max_tries=10,
     )
-    h, J, kT = energetics_generic(
+    h, J, kT = energetics(
         vars, input_params, dn_sol, an_sol, x_sol, v_sol, dn_an, x_an, v_an, z
     )
     return jnp.sum(h * z * vars)
