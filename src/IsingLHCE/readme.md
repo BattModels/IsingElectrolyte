@@ -65,3 +65,21 @@ Includes helper functions for post-processing the results of the model.
 - visualize_conc_factor_x: plot conentration-volume correction scheme as a function of concentration, for a given set of parameters.
 - visualize_conc_factor_V: plot conentration-volume correction scheme as a function of volume
 - visualize_conc_factor_x_V: plot conentration-volume correction scheme as a function of concentration and volume, for a given set of parameters.
+
+## Code Structure
+```
+src/IsingLHCE/
+├── __init__.py
+├── interactions.py
+├── conc_vol_correction.py
+├── model.py
+├── train.py
+├── analysis/
+│   ├── __init__.py
+│   ├── h_terms.py
+│   ├── j_terms.py
+│   ├── free_energy.py
+│   └── conc_vol_viz.py
+├── readme.md
+└── ref_params.pkl
+```
