@@ -1301,6 +1301,54 @@ def visualize_li_free_energy_dn_an_contour(trained_params):
     plt.colorbar(label="Energy (eV)")
     plt.savefig("li_free_energy_dn_an_contour.png", dpi=300, bbox_inches="tight")
 
+def visualize_li_free_energy_dn_an(trained_params):
+    dn0 = 20.0
+    an0 = 10.2
+    dn1 = jnp.linspace(10.0, 40, 100)
+    an1 = jnp.arange(5, 21, 5)
+    dn_anion = 11.2
+    x0, x1 = 0.24, 0.48
+    x_anion = 0.14
+    solvent_volume = solvent_map_dict["DME"]['volume A3']
+    diluent_volume = solvent_map_dict["TTE"]['volume A3']
+    anion_volume = solvent_map_dict["TFSI"]['volume A3']
+    z = 3.72 / 2.0
+
+    def predict(d1, a1):
+        input_constants = jnp.array(
+            [
+                dn0,
+                d1,
+                dn_anion,
+                x0,
+                x1,
+                an0,
+                a1,
+                x_anion,
+                solvent_volume,
+                diluent_volume,
+                anion_volume,
+                z,
+            ]
+        )
+        root, _ = find_root(trained_params, input_constants)
+        h, J, avg_m, avg_n, avg_l, kT, _ = energetics(root, trained_params, input_constants)
+        return h[0] * avg_m + h[1] * avg_n + h[2] * avg_l
+        # return li_free_energy(trained_params, input_constants)
+
+    fig = plt.figure(figsize=(6, 5))
+    ax = fig.add_axes([0, 0, 1, 1])
+    for i, an1_value in enumerate(an1):
+        batched_predict = jax.vmap(predict)
+        dn1_flat = dn1.flatten()
+        an1_flat = an1_value * jnp.ones_like(dn1_flat)
+        y_pred_flat = batched_predict(dn1_flat, an1_flat)
+        ax.plot(dn1_flat, y_pred_flat, label=f"AN={an1_value}")
+    plt.xlabel("Solvent 2 DN")
+    plt.ylabel("Li Free energy (eV)")
+    ax.legend()
+    plt.savefig("li_free_energy_dn_an.png", dpi=300, bbox_inches="tight")
+
 
 def salt_salt_func(params_salt):
     """
