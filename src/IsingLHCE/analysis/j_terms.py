@@ -707,17 +707,24 @@ def sol_sol_func_fixed_m_dn(params_sol, params_conc_factor_sol):
     plt.savefig("sol_sol_func_fixed_m_dn.png", dpi=300, bbox_inches="tight")
     plt.close(fig)
 
-def salt_salt_func(params_salt):
-    """
-    plot how salt DN and c_anion affects output
+def salt_salt_func(params_anion_anion):
+    """Self-interaction J(anion, anion) as a function of anion DN and molar ratio.
+
+    Uses the self-interaction form (DN_i = DN_j), sweeping DN and molar ratio
+    as a 2D contour. For the cross-interaction contour (DN_i vs DN_j), see
+    salt_salt_func_cross_contour.
     """
     npoints = 100
-    dn_pred = jnp.linspace(-10, 40, npoints)
-    c_pred = jnp.linspace(0, 0.5, npoints)
-    dn_pred, an_pred = jnp.meshgrid(dn_pred, c_pred)
-    dn_pred = dn_pred.reshape(-1, 1)
-    c_pred = an_pred.reshape(-1, 1)
-    y_pred = expfunc(dn_pred, params_salt[:4]) + logfunc(c_pred, params_salt[4])
+    dn_lin = jnp.linspace(-10, 40, npoints)
+    c_lin  = jnp.linspace(0, 0.5, npoints)
+    DN, C  = jnp.meshgrid(dn_lin, c_lin)
+    dn_pred = DN.reshape(-1, 1)
+    c_pred  = C.reshape(-1, 1)
+    # Self-interaction: both anions have the same DN and the same molar ratio
+    y_pred = (
+        sol_sol_func((dn_pred, dn_pred), params_anion_anion[:5])
+        + 2.0 * logfunc(c_pred, params_anion_anion[5])
+    )
     fig = plt.figure(figsize=(6, 5))
     ax = fig.add_axes([0, 0, 1, 1])
     plt.contourf(
@@ -727,49 +734,80 @@ def salt_salt_func(params_salt):
         levels=100,
         cmap="plasma",
     )
-    plt.xlabel("Salt DN")
-    plt.ylabel("Salt Molar Ratio")
+    plt.xlabel("Anion DN")
+    plt.ylabel("Anion Molar Ratio")
     plt.colorbar(label="$J_{anion-anion}$")
     plt.savefig("salt_salt_func.png", dpi=300, bbox_inches="tight")
+    plt.close(fig)
 
 
-def salt_salt_func_fixed_c(params_salt):
-    """
-    plot how salt DN affects output, fixing c
-    """
+def salt_salt_func_fixed_c(params_anion_anion):
+    """Self-interaction J(anion, anion) vs. anion DN for fixed molar ratios."""
     npoints = 100
     dn_pred = jnp.linspace(-10, 40, npoints).reshape(-1, 1)
     fig = plt.figure(figsize=(6, 5))
     ax = fig.add_axes([0, 0, 1, 1])
     for c in np.arange(0.05, 0.25, 0.05):
         c_pred = c * jnp.ones_like(dn_pred)
-        y_pred = expfunc(dn_pred, params_salt[:4]) + logfunc(c_pred, params_salt[4:])
+        y_pred = (
+            sol_sol_func((dn_pred, dn_pred), params_anion_anion[:5])
+            + 2.0 * logfunc(c_pred, params_anion_anion[5])
+        )
         plt.plot(
             dn_pred.flatten(), y_pred.flatten(), label=r"$x_{anion}$" + f"={c:.2f}"
         )
-    plt.xlabel("Salt DN")
+    plt.xlabel("Anion DN")
     plt.ylabel("$J_{anion-anion}$")
     plt.legend()
     plt.savefig("salt_salt_func_fixed_c.png", dpi=300, bbox_inches="tight")
     plt.close(fig)
 
 
-def salt_salt_func_fixed_dn(params_salt):
-    """
-    plot how molar ratio affects output, fixing DN
-    """
+def salt_salt_func_fixed_dn(params_anion_anion):
+    """Self-interaction J(anion, anion) vs. molar ratio for fixed anion DNs."""
     npoints = 100
     c_pred = jnp.linspace(0.05, 0.5, npoints).reshape(-1, 1)
     fig = plt.figure(figsize=(6, 5))
     ax = fig.add_axes([0, 0, 1, 1])
     salt_dn_dict = {"PF6": -6.2, "BF4": 7.3, "TFSI": 11.2}
-    for key in salt_dn_dict.keys():
-        dn = salt_dn_dict[key]
+    for name, dn in salt_dn_dict.items():
         dn_pred = dn * jnp.ones_like(c_pred)
-        y_pred = expfunc(dn_pred, params_salt[:4]) + logfunc(c_pred, params_salt[4:])
-        plt.plot(c_pred.flatten(), y_pred.flatten(), label=f"{key}$^-$")
-    plt.xlabel("Molar Ratio")
+        y_pred = (
+            sol_sol_func((dn_pred, dn_pred), params_anion_anion[:5])
+            + 2.0 * logfunc(c_pred, params_anion_anion[5])
+        )
+        plt.plot(c_pred.flatten(), y_pred.flatten(), label=f"{name}$^-$")
+    plt.xlabel("Anion Molar Ratio")
     plt.ylabel("$J_{anion-anion}$")
     plt.legend()
     plt.savefig("salt_salt_func_fixed_dn.png", dpi=300, bbox_inches="tight")
+    plt.close(fig)
+
+
+def salt_salt_func_cross_contour(params_anion_anion):
+    """Cross-interaction J(anion_i, anion_j) as a 2D contour over both anion DNs.
+
+    Produces one panel per fixed molar ratio (shared for both anions).
+    This complements salt_salt_func (which shows the self-interaction diagonal).
+    """
+    x_vals  = [0.05, 0.10, 0.15, 0.20]
+    npoints = 100
+    dn_lin  = jnp.linspace(-10, 40, npoints)
+    DN_i, DN_j = jnp.meshgrid(dn_lin, dn_lin)
+
+    fig, axes = plt.subplots(2, 2, figsize=(10, 8), sharex=True, sharey=True)
+    for ax, x in zip(axes.flatten(), x_vals):
+        # Cross-interaction: logfunc(x_i, ...) + logfunc(x_j, ...) with x_i = x_j = x
+        Z = (
+            sol_sol_func((DN_i, DN_j), params_anion_anion[:5])
+            + 2.0 * logfunc(x * jnp.ones_like(DN_i), params_anion_anion[5])
+        )
+        cf = ax.contourf(DN_i, DN_j, Z, levels=100, cmap="plasma")
+        ax.set_title(f"$x_{{anion}}$ = {x:.2f}")
+        fig.colorbar(cf, ax=ax, label="$J_{anion-anion}$")
+    for ax in axes[-1]:
+        ax.set_xlabel("Anion $i$ DN")
+    for ax in axes[:, 0]:
+        ax.set_ylabel("Anion $j$ DN")
+    plt.savefig("salt_salt_func_cross_contour.png", dpi=300, bbox_inches="tight")
     plt.close(fig)
