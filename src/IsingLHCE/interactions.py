@@ -77,3 +77,92 @@ def polynomial_func(x, params, n=2):
     for i in range(n+1):
         output += params[i] * x**i
     return output
+
+
+# ---------------------------------------------------------------------------
+# Default h and J term functions — injectable defaults for energetics()
+#
+# Each function encodes one piece of the mean-field physics. Pass a
+# replacement to find_root / energetics / li_free_energy to test a new
+# hypothesis without touching any other code.
+#
+# Signatures are fixed contracts:
+#   h_sol_func(dn_eff, x, params)             → scalar
+#   h_an_func(dn_an, x, params)               → scalar
+#   J_sol_sol_func(dn_i, an_i, x_i,
+#                  dn_j, an_j, x_j, params)   → scalar
+#   J_sol_an_func(dn_an, an_sol, x_sol,
+#                 x_an, params)               → scalar
+#   J_an_an_func(dn_i, x_i, dn_j, x_j,
+#                params)                      → scalar
+# ---------------------------------------------------------------------------
+
+def default_h_sol(dn_eff, x, params):
+    """Li-solvent h term: logistic function of effective DN + log of molar ratio.
+
+    params: sol_params_dn (5 elements) — params[:4] for expfunc, params[4] for logfunc.
+    """
+    return expfunc(dn_eff, params[:4]) + logfunc(x, params[4])
+
+
+def default_h_an(dn_an, x, params):
+    """Li-anion h term: logistic function of anion DN + log of molar ratio.
+
+    params: salt_params_dn (5 elements) — same layout as default_h_sol.
+    """
+    return expfunc(dn_an, params[:4]) + logfunc(x, params[4])
+
+
+def default_J_sol_sol(dn_i, an_i, x_i, dn_j, an_j, x_j, params):
+    """Solvent-solvent J term.
+
+    A single unified formula that correctly handles both the self-interaction
+    (i == j) and cross-interaction (i != j) cases: when i == j the two
+    sol_sol_func DN-AN calls become identical (doubling) and the two logfunc
+    calls collapse to 2*logfunc — matching the original explicit branching.
+
+    params: params_sol_sol (16 elements)
+      [:5]   DN-AN cross term
+      [5:10] DN-DN term
+      [10:15] AN-AN term
+      [15]   logfunc concentration term
+    """
+    return (
+        sol_sol_func(jnp.array([dn_i, an_j]), params[:5])
+        + sol_sol_func(jnp.array([dn_j, an_i]), params[:5])
+        + sol_sol_func(jnp.array([dn_i, dn_j]), params[5:10])
+        + sol_sol_func(jnp.array([an_i, an_j]), params[10:15])
+        + logfunc(x_i, params[15])
+        + logfunc(x_j, params[15])
+    )
+
+
+def default_J_sol_an(dn_an, an_sol, x_sol, x_an, params):
+    """Solvent-anion J term.
+
+    params: params_sol_salt_an (6 elements)
+      [:5]  sol_sol_func term (anion DN × solvent AN)
+      [5]   logfunc concentration term (applied to both x_sol and x_an)
+    """
+    return (
+        sol_sol_func(jnp.array([dn_an, an_sol]), params[:5])
+        + logfunc(x_sol, params[5])
+        + logfunc(x_an, params[5])
+    )
+
+
+def default_J_an_an(dn_i, x_i, dn_j, x_j, params):
+    """Anion-anion J term.
+
+    Unified formula for both self (i == j) and cross (i != j) interactions
+    via sol_sol_func with both anion DNs as inputs.
+
+    params: params_anion_anion (6 elements)
+      [:5]  sol_sol_func term (DN_i × DN_j)
+      [5]   logfunc concentration term (applied to both x_i and x_j)
+    """
+    return (
+        sol_sol_func(jnp.array([dn_i, dn_j]), params[:5])
+        + logfunc(x_i, params[5])
+        + logfunc(x_j, params[5])
+    )
