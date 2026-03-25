@@ -1,16 +1,6 @@
-import numpy as np
-import matplotlib.pyplot as plt
-import pandas as pd
-from scipy.optimize import fsolve, root
-import jax, optax, os
+import jax
 import jax.numpy as jnp
-from jaxopt import Broyden
-from jax import grad
-import pickle
-import copy
-from jax import random
-from functools import partial
-from IsingLHCE.functions import (
+from .interactions import (
     expfunc,
     polynomial_func,
 )
@@ -38,4 +28,15 @@ def conc_factor_wrapped_sigmoid(x0, x_ref, V0, V_ref, params):
     """
     phi = (x0 / x_ref) * (V_ref / V0)
     output = expfunc(phi, params = params)
+    return output
+
+@jax.jit
+def logfunc_conc_factor(x, params):
+    """
+    A simple log function with concentration factor.
+    x is the input vector.
+    params is an array of parameters
+    """
+    a0, a1 = params
+    output = a0 * jnp.log(x) + a1
     return output

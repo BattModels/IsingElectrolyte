@@ -1,15 +1,5 @@
-import numpy as np
-import matplotlib.pyplot as plt
-import pandas as pd
-from scipy.optimize import fsolve, root
-import jax, optax, os
+import jax
 import jax.numpy as jnp
-from jaxopt import Broyden
-from jax import grad
-import pickle
-import copy
-from jax import random
-from functools import partial
 
 @jax.jit
 def mlp(x, params):
