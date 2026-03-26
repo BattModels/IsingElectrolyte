@@ -538,8 +538,6 @@ def _find_root_impl(
     Term functions are static arguments: JAX recompiles when they change
     (which is the desired behavior when testing a new hypothesis) and caches
     the compiled version for repeated calls with the same functions.
-
-    jit=False on the Broyden solver because _find_root_impl is already JIT'd.
     """
     _eq = partial(
         equations,
@@ -603,7 +601,6 @@ def _find_root_impl(
         try_solve, (init_best, init_found), guesses
     )
     return final_sol, found_valid
-
 
 def find_root(
     input_params, solvents, anions, z,
