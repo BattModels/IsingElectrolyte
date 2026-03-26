@@ -15,6 +15,42 @@ jax.config.update("jax_enable_x64", True)
 jax.config.update("jax_disable_jit", False)
 
 # ---------------------------------------------------------------------------
+# Monotonicity configuration
+# ---------------------------------------------------------------------------
+
+#: Default monotonicity constraints for each parameter group.
+#: Pass a modified copy of this dict as ``monotonicity_dict`` to any top-level
+#: function (``find_root``, ``li_free_energy``, ``get_root_error``, …) to
+#: experiment with different physical assumptions without touching the code.
+#:
+#: Allowed values per key:
+#:   "decrease" — the interaction strength decreases as the descriptor increases
+#:   "increase" — the interaction strength increases as the descriptor increases
+#:   "none"     — no monotonicity constraint; parameters are left unconstrained
+DEFAULT_MONOTONICITY = {
+    "sol_params_dn":      "decrease",   # h(Li-sol) decreases with DN
+    "salt_params_dn":     "decrease",   # h(Li-anion) decreases with DN
+    "params_sol_salt_an": "decrease",   # J(sol-anion) decreases with DN/AN
+    "params_sol_sol":     "decrease",   # J(sol-sol) decreases with DN/AN cross
+    "params_anion_anion": "increase",   # J(anion-anion) increases with DN
+    "conc_factor_sol":    "increase",   # concentration factor increases with x, V
+}
+
+
+def _freeze_mono(d):
+    """Convert a monotonicity dict to a hashable frozenset for JAX static args.
+
+    JAX requires static arguments to be hashable.  Plain Python dicts are not,
+    so we convert to ``frozenset(d.items())`` at every JIT boundary.  The
+    inverse (``dict(frozen)``) is used inside ``rescale_input_params`` for the
+    string lookups.  Users always interact with plain dicts.
+    """
+    if isinstance(d, frozenset):
+        return d
+    return frozenset(d.items())
+
+
+# ---------------------------------------------------------------------------
 # Legacy fixed-species functions (2 solvents + 1 anion)
 # ---------------------------------------------------------------------------
 
@@ -326,22 +362,6 @@ def _species_props_to_arrays(solvents, anions):
     return dn_sol, an_sol, x_sol, v_sol, dn_an, x_an, v_an
 
 
-# Sign masks for rescale_input_params.
-# +1 → softplus(p[i])  (force positive)
-# -1 → -softplus(p[i]) (force negative)
-#  0 → p[i] unchanged
-#
-# Read alongside the physics comments in rescale_input_params_old for context.
-_SIGNS_SOL_PARAMS_DN      = jnp.array([ 0, +1, +1, -1, -1])
-_SIGNS_SALT_PARAMS_DN     = jnp.array([ 0, +1, +1, -1, -1])
-_SIGNS_SOL_SALT_AN        = jnp.array([ 0, +1,  0, +1, +1, -1])
-_SIGNS_SOL_SOL            = jnp.array([ 0, +1,  0, +1, +1,  0,
-                                        +1,  0, -1, -1,  0, +1,
-                                         0, -1, -1, -1])
-_SIGNS_ANION_ANION        = jnp.array([ 0, +1,  0, -1, -1, -1])
-_SIGNS_CONC_FACTOR        = jnp.array([ 0, -1, +1, -1,  0, +1, +1, +1])
-
-
 def _apply_softplus(p, signs):
     """Vectorized signed-softplus transform.
 
@@ -352,15 +372,68 @@ def _apply_softplus(p, signs):
     return jnp.where(signs == 0, p, signs * jnn.softplus(p))
 
 
-@jax.jit
-def rescale_input_params(input_params):
+@partial(jax.jit, static_argnames=("monotonicity_dict",))
+def rescale_input_params(input_params, monotonicity_dict=None):
     """Rescale parameters for the generic multi-species model.
 
-    Each parameter array has a corresponding sign-mask (_SIGNS_*) that
-    encodes which indices must be forced positive (+1), negative (-1),
-    or left free (0).  _apply_softplus applies the transform in one
-    vectorized pass instead of per-index .at[].set() calls.
+    Args:
+        input_params:      parameter dict with keys sol_params_dn, salt_params_dn,
+                           params_sol_salt_an, params_sol_sol, params_anion_anion,
+                           conc_factor_sol.
+        monotonicity_dict: frozenset of (key, value) pairs produced by
+                           ``_freeze_mono()``, or None to use DEFAULT_MONOTONICITY.
+                           Declared as a static arg so JAX recompiles only when
+                           the monotonicity configuration actually changes.
+
+    Each parameter array has a sign-mask that encodes which indices must be
+    forced positive (+1), negative (-1), or left free (0).  _apply_softplus
+    applies the transform in one vectorized pass.
     """
+    # Convert frozenset → dict for string lookups; fall back to default.
+    mono = dict(monotonicity_dict) if monotonicity_dict is not None else DEFAULT_MONOTONICITY
+    if mono["sol_params_dn"].lower() == "decrease":
+        _SIGNS_SOL_PARAMS_DN      = jnp.array([ 0, +1, +1, -1, -1])
+    elif mono["sol_params_dn"].lower() == "increase":
+        _SIGNS_SOL_PARAMS_DN      = jnp.array([ 0, +1, +1, +1, -1])
+    else:
+        _SIGNS_SOL_PARAMS_DN      = jnp.zeros(5)
+    if mono["salt_params_dn"].lower() == "decrease":
+        _SIGNS_SALT_PARAMS_DN     = jnp.array([ 0, +1, +1, -1, -1])
+    elif mono["salt_params_dn"].lower() == "increase":
+        _SIGNS_SALT_PARAMS_DN     = jnp.array([ 0, +1, +1, +1, -1])
+    else:
+        _SIGNS_SALT_PARAMS_DN     = jnp.zeros(5)
+    if mono["params_sol_salt_an"].lower() == "decrease":
+        _SIGNS_SOL_SALT_AN        = jnp.array([ 0, +1,  0, +1, +1, -1])
+    elif mono["params_sol_salt_an"].lower() == "increase":
+        _SIGNS_SOL_SALT_AN        = jnp.array([ 0, +1,  0, -1, -1, -1])
+    else:
+        _SIGNS_SOL_SALT_AN        = jnp.zeros(6)
+    if mono['params_sol_sol'].lower() == "decrease":
+        _SIGNS_SOL_SOL            = jnp.array([ 0, +1, 0, +1, +1,
+                                                0, +1, 0, -1, -1,
+                                                0, +1, 0, -1, -1,
+                                                -1])
+    elif mono['params_sol_sol'].lower() == "increase":
+        _SIGNS_SOL_SOL            = jnp.array([ 0, +1, 0, -1, -1,  
+                                                 0, +1, 0, -1, -1,
+                                                 0, +1, 0, -1, -1, 
+                                                 -1])
+    else:
+        _SIGNS_SOL_SOL            = jnp.zeros(16)
+    if mono["params_anion_anion"].lower() == "increase":
+        _SIGNS_ANION_ANION        = jnp.array([ 0, +1,  0, -1, -1, -1])
+    elif mono["params_anion_anion"].lower() == "decrease":
+        _SIGNS_ANION_ANION        = jnp.array([ 0, +1,  0, +1, +1, -1])
+    else:
+        _SIGNS_ANION_ANION        = jnp.zeros(6)
+    if mono["conc_factor_sol"].lower() == "increase":
+        _SIGNS_CONC_FACTOR        = jnp.array([ 0, -1, +1, -1,  0, +1, +1, +1])
+    elif mono["conc_factor_sol"].lower() == "decrease":
+        _SIGNS_CONC_FACTOR        = jnp.array([ 0, +1, +1, +1,  0, +1, +1, +1])
+    else:
+        _SIGNS_CONC_FACTOR        = jnp.zeros(8)
+
     input_params["sol_params_dn"]      = _apply_softplus(input_params["sol_params_dn"],      _SIGNS_SOL_PARAMS_DN)
     input_params["salt_params_dn"]     = _apply_softplus(input_params["salt_params_dn"],     _SIGNS_SALT_PARAMS_DN)
     input_params["params_sol_salt_an"] = _apply_softplus(input_params["params_sol_salt_an"], _SIGNS_SOL_SALT_AN)
@@ -377,6 +450,7 @@ def energetics(
     J_sol_sol_func=default_J_sol_sol,
     J_sol_an_func=default_J_sol_an,
     J_an_an_func=default_J_an_an,
+    monotonicity_dict=None,
 ):
     """Compute h and J for a generic N-solvent + M-anion Ising model.
 
@@ -405,7 +479,7 @@ def energetics(
         kT:  thermal energy (scalar)
     """
     kT = 0.0257
-    input_params = rescale_input_params(input_params)
+    input_params = rescale_input_params(input_params, monotonicity_dict=monotonicity_dict)
 
     sol_params_dn_tmp      = input_params["sol_params_dn"]
     salt_params_dn_tmp     = input_params["salt_params_dn"]
@@ -482,17 +556,18 @@ def equations(
     J_sol_sol_func=default_J_sol_sol,
     J_sol_an_func=default_J_sol_an,
     J_an_an_func=default_J_an_an,
+    monotonicity_dict=None,
 ):
     """Mean-field self-consistency equations for N-solvent + M-anion Ising model.
 
     Returns residuals f_i = exp_i / Z - vars_i for each species i.
-    Term functions are passed through to energetics unchanged.
+    Term functions and monotonicity_dict are passed through to energetics unchanged.
     """
     h, J, kT = energetics(
         vars, input_params, dn_sol, an_sol, x_sol, v_sol, dn_an, x_an, v_an, z,
         h_sol_func=h_sol_func, h_an_func=h_an_func,
         J_sol_sol_func=J_sol_sol_func, J_sol_an_func=J_sol_an_func,
-        J_an_an_func=J_an_an_func,
+        J_an_an_func=J_an_an_func, monotonicity_dict=monotonicity_dict,
     )
     energies = -(h + (z / 2.0) * (J @ vars + jnp.diag(J) * vars)) / kT
     exps = jnp.exp(energies)
@@ -503,6 +578,7 @@ def equations(
     "max_tries",
     "h_sol_func", "h_an_func",
     "J_sol_sol_func", "J_sol_an_func", "J_an_an_func",
+    "monotonicity_dict",
 ))
 def _find_root_impl(
     input_params, dn_sol, an_sol, x_sol, v_sol, dn_an, x_an, v_an, z,
@@ -512,6 +588,7 @@ def _find_root_impl(
     J_sol_sol_func=default_J_sol_sol,
     J_sol_an_func=default_J_sol_an,
     J_an_an_func=default_J_an_an,
+    monotonicity_dict=None,
 ):
     """JIT-compiled multi-start Broyden solver.
 
@@ -523,7 +600,7 @@ def _find_root_impl(
         equations,
         h_sol_func=h_sol_func, h_an_func=h_an_func,
         J_sol_sol_func=J_sol_sol_func, J_sol_an_func=J_sol_an_func,
-        J_an_an_func=J_an_an_func,
+        J_an_an_func=J_an_an_func, monotonicity_dict=monotonicity_dict,
     )
     # jit=True: jaxopt uses jax.lax.while_loop internally, which is required
     # for compatibility with jax.lax.cond / jax.lax.scan (traced context).
@@ -589,22 +666,25 @@ def find_root(
     J_sol_sol_func=default_J_sol_sol,
     J_sol_an_func=default_J_sol_an,
     J_an_an_func=default_J_an_an,
+    monotonicity_dict=DEFAULT_MONOTONICITY,
     initial_guess=None, max_tries=10,
 ):
     """Multi-start root solver for the generic N-solvent + M-anion Ising model.
 
     Args:
-        input_params:  parameter dict (must include params_anion_anion, 6 elements)
-        solvents:      dict of {name: {"dn": ..., "an": ..., "x": ..., "volume": ...}}
-        anions:        dict of {name: {"dn": ..., "x": ..., "volume": ...}}
-        z:             coordination number
-        h_sol_func:    h term for solvents — default: expfunc + logfunc
-        h_an_func:     h term for anions  — default: expfunc + logfunc
-        J_sol_sol_func: J term for solvent pairs — default: DN/AN cross + DN-DN + AN-AN
-        J_sol_an_func:  J term for solvent-anion — default: sol_sol_func of (dn_an, an_sol)
-        J_an_an_func:   J term for anion pairs   — default: sol_sol_func of (dn_i, dn_j)
-        initial_guess: shape (N+M,), defaults to uniform 1/(N+M)
-        max_tries:     number of initial guesses to try (default 10)
+        input_params:      parameter dict (must include params_anion_anion, 6 elements)
+        solvents:          dict of {name: {"dn": ..., "an": ..., "x": ..., "volume": ...}}
+        anions:            dict of {name: {"dn": ..., "x": ..., "volume": ...}}
+        z:                 coordination number
+        h_sol_func:        h term for solvents — default: expfunc + logfunc
+        h_an_func:         h term for anions  — default: expfunc + logfunc
+        J_sol_sol_func:    J term for solvent pairs — default: DN/AN cross + DN-DN + AN-AN
+        J_sol_an_func:     J term for solvent-anion — default: sol_sol_func of (dn_an, an_sol)
+        J_an_an_func:      J term for anion pairs   — default: sol_sol_func of (dn_i, dn_j)
+        monotonicity_dict: dict controlling monotonicity constraints — see DEFAULT_MONOTONICITY.
+                           Converted to a frozenset internally for JAX static-arg hashing.
+        initial_guess:     shape (N+M,), defaults to uniform 1/(N+M)
+        max_tries:         number of initial guesses to try (default 10)
 
     Returns:
         (occupations, found_valid): shape (N+M,) array and boolean flag
@@ -618,7 +698,7 @@ def find_root(
         initial_guess, max_tries,
         h_sol_func=h_sol_func, h_an_func=h_an_func,
         J_sol_sol_func=J_sol_sol_func, J_sol_an_func=J_sol_an_func,
-        J_an_an_func=J_an_an_func,
+        J_an_an_func=J_an_an_func, monotonicity_dict=_freeze_mono(monotonicity_dict),
     )
 
 
@@ -629,6 +709,7 @@ def get_root_error(
     J_sol_sol_func=default_J_sol_sol,
     J_sol_an_func=default_J_sol_an,
     J_an_an_func=default_J_an_an,
+    monotonicity_dict=DEFAULT_MONOTONICITY,
 ):
     """Diagnostic: returns mean-field equation residuals for given occupation fractions."""
     dn_sol, an_sol, x_sol, v_sol, dn_an, x_an, v_an = _species_props_to_arrays(solvents, anions)
@@ -636,7 +717,7 @@ def get_root_error(
         vars, input_params, dn_sol, an_sol, x_sol, v_sol, dn_an, x_an, v_an, z,
         h_sol_func=h_sol_func, h_an_func=h_an_func,
         J_sol_sol_func=J_sol_sol_func, J_sol_an_func=J_sol_an_func,
-        J_an_an_func=J_an_an_func,
+        J_an_an_func=J_an_an_func, monotonicity_dict=_freeze_mono(monotonicity_dict),
     )
 
 
@@ -647,16 +728,18 @@ def li_free_energy(
     J_sol_sol_func=default_J_sol_sol,
     J_sol_an_func=default_J_sol_an,
     J_an_an_func=default_J_an_an,
+    monotonicity_dict=DEFAULT_MONOTONICITY,
 ):
     """Li+ solvation free energy for a generic N-solvent + M-anion system.
 
     Args:
-        input_params: parameter dict (must include params_anion_anion, 6 elements)
-        solvents:     dict of {name: {"dn": ..., "an": ..., "x": ..., "volume": ...}}
-        anions:       dict of {name: {"dn": ..., "x": ..., "volume": ...}}
-        z:            coordination number
+        input_params:      parameter dict (must include params_anion_anion, 6 elements)
+        solvents:          dict of {name: {"dn": ..., "an": ..., "x": ..., "volume": ...}}
+        anions:            dict of {name: {"dn": ..., "x": ..., "volume": ...}}
+        z:                 coordination number
         h_sol_func, h_an_func, J_sol_sol_func, J_sol_an_func, J_an_an_func:
-                      injectable term functions (defaults = current physics)
+                           injectable term functions (defaults = current physics)
+        monotonicity_dict: dict controlling monotonicity constraints — see DEFAULT_MONOTONICITY.
 
     Returns:
         G: scalar free energy
@@ -664,17 +747,18 @@ def li_free_energy(
     dn_sol, an_sol, x_sol, v_sol, dn_an, x_an, v_an = _species_props_to_arrays(solvents, anions)
     n_species = len(solvents) + len(anions)
     initial_guess = jnp.ones(n_species) / n_species
+    mono_frozen = _freeze_mono(monotonicity_dict)
     vars, _ = _find_root_impl(
         input_params, dn_sol, an_sol, x_sol, v_sol, dn_an, x_an, v_an, z,
         initial_guess, max_tries=10,
         h_sol_func=h_sol_func, h_an_func=h_an_func,
         J_sol_sol_func=J_sol_sol_func, J_sol_an_func=J_sol_an_func,
-        J_an_an_func=J_an_an_func,
+        J_an_an_func=J_an_an_func, monotonicity_dict=mono_frozen,
     )
     h, J, kT = energetics(
         vars, input_params, dn_sol, an_sol, x_sol, v_sol, dn_an, x_an, v_an, z,
         h_sol_func=h_sol_func, h_an_func=h_an_func,
         J_sol_sol_func=J_sol_sol_func, J_sol_an_func=J_sol_an_func,
-        J_an_an_func=J_an_an_func,
+        J_an_an_func=J_an_an_func, monotonicity_dict=mono_frozen,
     )
     return jnp.sum(h * z * vars)

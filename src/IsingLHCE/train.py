@@ -8,8 +8,9 @@ import os
 import pickle
 import copy
 from jax import random
+from functools import partial
 
-from .model import _find_root_impl
+from .model import _find_root_impl, DEFAULT_MONOTONICITY, _freeze_mono
 
 jax.config.update("jax_enable_x64", True)
 jax.config.update("jax_disable_jit", False)
@@ -25,6 +26,7 @@ def objective_single(
     z,
     targets,
     init_guess,
+    monotonicity_dict=None,
 ):
     """Compute the squared loss for a single data point.
 
@@ -35,21 +37,22 @@ def objective_single(
         z:                      coordination number (scalar)
         targets:                target occupation fractions, shape (N+M,)
         init_guess:             initial guess for the root solver, shape (N+M,)
+        monotonicity_dict:      frozenset from _freeze_mono(), or None for default.
 
     Returns:
         (loss, new_init): squared loss (scalar), updated initial guess shape (N+M,)
     """
     occupations, found_valid = _find_root_impl(
         input_params, dn_sol, an_sol, x_sol, v_sol, dn_an, x_an, v_an, z,
-        init_guess, max_tries=10,
+        init_guess, max_tries=10, monotonicity_dict=monotonicity_dict,
     )
     loss = jnp.sum((occupations - targets) ** 2)
     new_init = jnp.where(found_valid, occupations, init_guess)
     return loss, new_init
 
 
-@jax.jit
-def total_objective(params, data):
+@partial(jax.jit, static_argnames=("monotonicity_dict",))
+def total_objective(params, data, monotonicity_dict=None):
     """Compute RMSE loss over all data points.
 
     data must contain:
@@ -58,9 +61,10 @@ def total_objective(params, data):
         z:                            shape (n,) coordination numbers
         targets:                      shape (n, N+M) target occupation fractions
         init_guess:                   shape (n, N+M)
+    monotonicity_dict: frozenset from _freeze_mono(), or None for default.
     """
     v_objective = jax.vmap(
-        objective_single,
+        partial(objective_single, monotonicity_dict=monotonicity_dict),
         in_axes=(None, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
     )
     losses, new_inits = v_objective(
@@ -216,17 +220,18 @@ def initialize_params(
         return init_params
 
 
-@jax.jit
-def update(params, opt_state, data):
-    (loss, new_inits), grads = jax.value_and_grad(total_objective, has_aux=True)(
-        params, data
-    )
+@partial(jax.jit, static_argnames=("monotonicity_dict",))
+def update(params, opt_state, data, monotonicity_dict=None):
+    (loss, new_inits), grads = jax.value_and_grad(
+        partial(total_objective, monotonicity_dict=monotonicity_dict), has_aux=True
+    )(params, data)
     updates, opt_state = optimizer.update(grads, opt_state, params)
     params = optax.apply_updates(params, updates)
     return params, opt_state, loss, new_inits
 
 
-def train(params, num_epochs, train_data, test_data, val_data, opt_state, random_seed=42):
+def train(params, num_epochs, train_data, test_data, val_data, opt_state,
+          monotonicity_dict=DEFAULT_MONOTONICITY, random_seed=42):
     # Initialize backup variables
     prev_params = copy.deepcopy(params)  # backup from the previous step
     best_params = copy.deepcopy(params)  # backup for best parameters
@@ -268,15 +273,15 @@ def train(params, num_epochs, train_data, test_data, val_data, opt_state, random
             batch = {k: jnp.take(v, batch_idx, axis=0) for k, v in train_data.items()}
             batch['init_guess'] = jnp.take(init_guess_train, batch_idx, axis=0)
             # Compute gradients & update parameters on this batch
-            params, opt_state, loss, new_inits = update(params, opt_state, batch)
+            params, opt_state, loss, new_inits = update(params, opt_state, batch, monotonicity_dict=_freeze_mono(monotonicity_dict))
             init_guess_train = init_guess_train.at[batch_idx].set(new_inits)
             epoch_loss += loss
 
         epoch_loss /= steps_per_ep
         val_data['init_guess'] = init_guess_val
         test_data['init_guess'] = init_guess_test
-        val_loss, _ = total_objective(params, val_data)
-        test_loss, _ = total_objective(params, test_data)
+        val_loss, _ = total_objective(params, val_data, monotonicity_dict=_freeze_mono(monotonicity_dict))
+        test_loss, _ = total_objective(params, test_data, monotonicity_dict=_freeze_mono(monotonicity_dict))
         if epoch % 1 == 0:
             print(
                 f"Epoch {epoch}: loss = {epoch_loss:.4f}, val loss = {val_loss:.4f}, test loss = {test_loss:.4f}"
@@ -316,7 +321,7 @@ def train(params, num_epochs, train_data, test_data, val_data, opt_state, random
     return params, train_loss_log, val_loss_log
 
 
-def parity_results(data_dict, input_params):
+def parity_results(data_dict, input_params, monotonicity_dict=DEFAULT_MONOTONICITY):
     """Evaluate trained parameters against each dataset split and produce parity plots.
 
     data_dict maps split names (e.g. "train", "val", "test") to data dicts with keys:
@@ -346,6 +351,7 @@ def parity_results(data_dict, input_params):
                 data["dn_an"][i], data["x_an"][i], data["v_an"][i],
                 data["z"][i],
                 init_guess, max_tries=10,
+                monotonicity_dict=_freeze_mono(monotonicity_dict),
             )
             preds[i] = np.array(occupations)
 
