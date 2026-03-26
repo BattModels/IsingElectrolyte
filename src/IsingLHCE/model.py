@@ -4,7 +4,11 @@ import jax.nn as jnn
 from jaxopt import Broyden
 from functools import partial
 
-from .interactions import expfunc, logfunc, sol_sol_func
+from .interactions import (
+    expfunc, logfunc, sol_sol_func,
+    default_h_sol, default_h_an,
+    default_J_sol_sol, default_J_sol_an, default_J_an_an,
+)
 from .conc_vol_correction import conc_factor_sep_x_v_sigmoid
 
 jax.config.update("jax_enable_x64", True)
@@ -386,7 +390,14 @@ def rescale_input_params(input_params):
     return input_params
 
 
-def energetics(vars, input_params, dn_sol, an_sol, x_sol, v_sol, dn_an, x_an, v_an, z):
+def energetics(
+    vars, input_params, dn_sol, an_sol, x_sol, v_sol, dn_an, x_an, v_an, z,
+    h_sol_func=default_h_sol,
+    h_an_func=default_h_an,
+    J_sol_sol_func=default_J_sol_sol,
+    J_sol_an_func=default_J_sol_an,
+    J_an_an_func=default_J_an_an,
+):
     """Compute h and J for a generic N-solvent + M-anion Ising model.
 
     Args:
@@ -402,6 +413,11 @@ def energetics(vars, input_params, dn_sol, an_sol, x_sol, v_sol, dn_an, x_an, v_
         x_an:   molar fractions of anions, shape (M,)
         v_an:   molar volumes of anions, shape (M,)
         z:      coordination number (scalar)
+        h_sol_func:    callable(dn_eff, x, params) → scalar
+        h_an_func:     callable(dn_an, x, params) → scalar
+        J_sol_sol_func: callable(dn_i, an_i, x_i, dn_j, an_j, x_j, params) → scalar
+        J_sol_an_func:  callable(dn_an, an_sol, x_sol, x_an, params) → scalar
+        J_an_an_func:   callable(dn_i, x_i, dn_j, x_j, params) → scalar
 
     Returns:
         h:   single-particle energies, shape (N+M,)
@@ -418,121 +434,122 @@ def energetics(vars, input_params, dn_sol, an_sol, x_sol, v_sol, dn_an, x_an, v_
     params_anion_anion_tmp = input_params["params_anion_anion"]
     conc_factor_sol        = input_params["conc_factor_sol"]
 
-    n_sol = dn_sol.shape[0]
-    n_an  = dn_an.shape[0]
-    n_species = n_sol + n_an
-
     # Aggregate anion properties for concentration correction
     x_an_total = jnp.sum(x_an)
     v_an_avg   = jnp.sum(x_an * v_an) / x_an_total
 
-    # Effective DN and AN for each solvent after concentration correction
-    dn_eff = jnp.array([
-        dn_sol[i] * conc_factor_sep_x_v_sigmoid(x_sol[i], x_an_total, v_sol[i], v_an_avg, conc_factor_sol)
-        for i in range(n_sol)
-    ])
-    an_eff = jnp.array([
-        an_sol[i] * conc_factor_sep_x_v_sigmoid(x_sol[i], x_an_total, v_sol[i], v_an_avg, conc_factor_sol)
-        for i in range(n_sol)
-    ])
+    # --- Item 6: vmap dn_eff / an_eff (replaces list comprehensions) ---
+    # conc_factor_sep_x_v_sigmoid is called once per solvent with its own
+    # (x_sol[i], v_sol[i]) and shared (x_an_total, v_an_avg, params).
+    conc = jax.vmap(
+        conc_factor_sep_x_v_sigmoid, in_axes=(0, None, 0, None, None)
+    )(x_sol, x_an_total, v_sol, v_an_avg, conc_factor_sol)  # shape (N,)
+    dn_eff = dn_sol * conc
+    an_eff = an_sol * conc
 
-    # h terms: solvents (shared sol_params_dn) then anions (shared salt_params_dn)
-    h_list = []
-    for i in range(n_sol):
-        h_list.append(expfunc(dn_eff[i], sol_params_dn_tmp[:4]) + logfunc(x_sol[i], sol_params_dn_tmp[4]))
-    for j in range(n_an):
-        h_list.append(expfunc(dn_an[j], salt_params_dn_tmp[:4]) + logfunc(x_an[j], salt_params_dn_tmp[4]))
-    h = jnp.array(h_list)
+    # --- Items 1 & 2: vmap h terms (replaces Python for loops) ---
+    # Each call gets one species' scalar (dn/x) and the shared param array.
+    h_sol_vals = jax.vmap(h_sol_func, in_axes=(0, 0, None))(
+        dn_eff, x_sol, sol_params_dn_tmp
+    )  # shape (N,)
+    h_an_vals = jax.vmap(h_an_func, in_axes=(0, 0, None))(
+        dn_an, x_an, salt_params_dn_tmp
+    )  # shape (M,)
+    h = jnp.concatenate([h_sol_vals, h_an_vals])  # shape (N+M,)
 
-    # J matrix: all (i, j) pairs — Python loops unrolled at JAX trace time
-    J_rows = []
-    for i in range(n_species):
-        J_row = []
-        for j in range(n_species):
-            if i < n_sol and j < n_sol:
-                # Solvent-solvent
-                dn_i, an_i, x_i = dn_eff[i], an_eff[i], x_sol[i]
-                dn_j, an_j, x_j = dn_eff[j], an_eff[j], x_sol[j]
-                if i == j:
-                    j_ij = (
-                        sol_sol_func(jnp.array([dn_i, an_i]), params_sol_sol_tmp[:5])
-                        + sol_sol_func(jnp.array([dn_i, an_i]), params_sol_sol_tmp[:5])
-                        + sol_sol_func(jnp.array([dn_i, dn_i]), params_sol_sol_tmp[5:10])
-                        + sol_sol_func(jnp.array([an_i, an_i]), params_sol_sol_tmp[10:15])
-                        + 2.0 * logfunc(x_i, params_sol_sol_tmp[15])
-                    )
-                else:
-                    j_ij = (
-                        sol_sol_func(jnp.array([dn_i, an_j]), params_sol_sol_tmp[:5])
-                        + sol_sol_func(jnp.array([dn_j, an_i]), params_sol_sol_tmp[:5])
-                        + sol_sol_func(jnp.array([dn_i, dn_j]), params_sol_sol_tmp[5:10])
-                        + sol_sol_func(jnp.array([an_i, an_j]), params_sol_sol_tmp[10:15])
-                        + logfunc(x_i, params_sol_sol_tmp[15])
-                        + logfunc(x_j, params_sol_sol_tmp[15])
-                    )
-            elif i < n_sol and j >= n_sol:
-                # Solvent i — anion (j - n_sol)
-                aj = j - n_sol
-                dn_i, an_i, x_i = dn_eff[i], an_eff[i], x_sol[i]
-                dn_j, x_j = dn_an[aj], x_an[aj]
-                j_ij = (
-                    sol_sol_func(jnp.array([dn_j, an_i]), params_sol_salt_an_tmp[:5])
-                    + logfunc(x_i, params_sol_salt_an_tmp[5])
-                    + logfunc(x_j, params_sol_salt_an_tmp[5])
-                )
-            elif i >= n_sol and j < n_sol:
-                # Anion (i - n_sol) — solvent j (symmetric)
-                ai = i - n_sol
-                dn_i, x_i = dn_an[ai], x_an[ai]
-                dn_j, an_j, x_j = dn_eff[j], an_eff[j], x_sol[j]
-                j_ij = (
-                    sol_sol_func(jnp.array([dn_i, an_j]), params_sol_salt_an_tmp[:5])
-                    + logfunc(x_j, params_sol_salt_an_tmp[5])
-                    + logfunc(x_i, params_sol_salt_an_tmp[5])
-                )
-            else:
-                # Anion-anion (self and cross unified via sol_sol_func with both DNs)
-                ai = i - n_sol
-                aj = j - n_sol
-                dn_i, x_i = dn_an[ai], x_an[ai]
-                dn_j, x_j = dn_an[aj], x_an[aj]
-                j_ij = (
-                    sol_sol_func(jnp.array([dn_i, dn_j]), params_anion_anion_tmp[:5])
-                    + logfunc(x_i, params_anion_anion_tmp[5])
-                    + logfunc(x_j, params_anion_anion_tmp[5])
-                )
-            J_row.append(j_ij)
-        J_rows.append(jnp.array(J_row))
-    J = jnp.stack(J_rows)
+    # --- Items 2 & 3: vmap J blocks, then assemble with jnp.block ---
+    # J_ss: (N, N) — outer vmap over row i, inner over column j.
+    # Outer in_axes=(0,0,0, None,None,None, None): scalars dn_i/an_i/x_i are
+    # mapped (axis 0); the full j-side arrays and params are broadcast (None).
+    def _J_ss_row(dn_i, an_i, x_i):
+        return jax.vmap(
+            lambda dn_j, an_j, x_j: J_sol_sol_func(
+                dn_i, an_i, x_i, dn_j, an_j, x_j, params_sol_sol_tmp
+            )
+        )(dn_eff, an_eff, x_sol)
+
+    J_ss = jax.vmap(_J_ss_row)(dn_eff, an_eff, x_sol)  # (N, N)
+
+    # J_sa: (N, M) — row = solvent i, col = anion j.
+    # Outer maps over (an_eff[i], x_sol[i]); inner maps over anion j arrays.
+    def _J_sa_row(an_i, x_i):
+        return jax.vmap(
+            lambda dn_j, x_j: J_sol_an_func(dn_j, an_i, x_i, x_j, params_sol_salt_an_tmp)
+        )(dn_an, x_an)
+
+    J_sa = jax.vmap(_J_sa_row)(an_eff, x_sol)  # (N, M)
+
+    # J_aa: (M, M) — symmetric, outer maps over anion i, inner over anion j.
+    def _J_aa_row(dn_i, x_i):
+        return jax.vmap(
+            lambda dn_j, x_j: J_an_an_func(dn_i, x_i, dn_j, x_j, params_anion_anion_tmp)
+        )(dn_an, x_an)
+
+    J_aa = jax.vmap(_J_aa_row)(dn_an, x_an)  # (M, M)
+
+    # --- Item 3: jnp.block assembles the 2×2 block matrix in one XLA op ---
+    # J_sa.T gives the anion-solvent (M, N) block; symmetry is exact by construction.
+    J = jnp.block([[J_ss, J_sa],
+                   [J_sa.T, J_aa]])  # (N+M, N+M)
 
     return h, J, kT
 
 
-def equations(vars, input_params, dn_sol, an_sol, x_sol, v_sol, dn_an, x_an, v_an, z):
+def equations(
+    vars, input_params, dn_sol, an_sol, x_sol, v_sol, dn_an, x_an, v_an, z,
+    h_sol_func=default_h_sol,
+    h_an_func=default_h_an,
+    J_sol_sol_func=default_J_sol_sol,
+    J_sol_an_func=default_J_sol_an,
+    J_an_an_func=default_J_an_an,
+):
     """Mean-field self-consistency equations for N-solvent + M-anion Ising model.
 
     Returns residuals f_i = exp_i / Z - vars_i for each species i.
-    Generalizes equations_old() using the identity:
-        energy_i = h[i] + z/2 * ((J @ vars)[i] + J[i,i] * vars[i])
+    Term functions are passed through to energetics unchanged.
     """
     h, J, kT = energetics(
-        vars, input_params, dn_sol, an_sol, x_sol, v_sol, dn_an, x_an, v_an, z
+        vars, input_params, dn_sol, an_sol, x_sol, v_sol, dn_an, x_an, v_an, z,
+        h_sol_func=h_sol_func, h_an_func=h_an_func,
+        J_sol_sol_func=J_sol_sol_func, J_sol_an_func=J_sol_an_func,
+        J_an_an_func=J_an_an_func,
     )
     energies = -(h + (z / 2.0) * (J @ vars + jnp.diag(J) * vars)) / kT
     exps = jnp.exp(energies)
     return exps / jnp.sum(exps) - vars
 
 
-BROYDEN_SOLVER = Broyden(
-    fun=equations, maxiter=1000, tol=1e-8, verbose=False, jit=True
-)
-
-
-@partial(jax.jit, static_argnames=("max_tries",))
+@partial(jax.jit, static_argnames=(
+    "max_tries",
+    "h_sol_func", "h_an_func",
+    "J_sol_sol_func", "J_sol_an_func", "J_an_an_func",
+))
 def _find_root_impl(
     input_params, dn_sol, an_sol, x_sol, v_sol, dn_an, x_an, v_an, z,
     initial_guess, max_tries,
+    h_sol_func=default_h_sol,
+    h_an_func=default_h_an,
+    J_sol_sol_func=default_J_sol_sol,
+    J_sol_an_func=default_J_sol_an,
+    J_an_an_func=default_J_an_an,
 ):
+    """JIT-compiled multi-start Broyden solver.
+
+    Term functions are static arguments: JAX recompiles when they change
+    (which is the desired behavior when testing a new hypothesis) and caches
+    the compiled version for repeated calls with the same functions.
+    """
+    _eq = partial(
+        equations,
+        h_sol_func=h_sol_func, h_an_func=h_an_func,
+        J_sol_sol_func=J_sol_sol_func, J_sol_an_func=J_sol_an_func,
+        J_an_an_func=J_an_an_func,
+    )
+    # jit=True: jaxopt uses jax.lax.while_loop internally, which is required
+    # for compatibility with jax.lax.cond / jax.lax.scan (traced context).
+    # Nested JIT is idempotent in JAX so this does not cause recompilation.
+    solver = Broyden(fun=_eq, maxiter=1000, tol=1e-8, verbose=False, jit=True)
+
     n_species = dn_sol.shape[0] + dn_an.shape[0]
     ones = jnp.ones(n_species)
     guesses = jnp.stack([
@@ -556,7 +573,7 @@ def _find_root_impl(
             return best_sol, found_valid
 
         def do_solve(_):
-            sol = BROYDEN_SOLVER.run(
+            sol = solver.run(
                 guess,
                 input_params=input_params,
                 dn_sol=dn_sol, an_sol=an_sol, x_sol=x_sol, v_sol=v_sol,
@@ -585,8 +602,15 @@ def _find_root_impl(
     )
     return final_sol, found_valid
 
-
-def find_root(input_params, solvents, anions, z, initial_guess=None, max_tries=10):
+def find_root(
+    input_params, solvents, anions, z,
+    h_sol_func=default_h_sol,
+    h_an_func=default_h_an,
+    J_sol_sol_func=default_J_sol_sol,
+    J_sol_an_func=default_J_sol_an,
+    J_an_an_func=default_J_an_an,
+    initial_guess=None, max_tries=10,
+):
     """Multi-start root solver for the generic N-solvent + M-anion Ising model.
 
     Args:
@@ -594,6 +618,11 @@ def find_root(input_params, solvents, anions, z, initial_guess=None, max_tries=1
         solvents:      dict of {name: {"dn": ..., "an": ..., "x": ..., "volume": ...}}
         anions:        dict of {name: {"dn": ..., "x": ..., "volume": ...}}
         z:             coordination number
+        h_sol_func:    h term for solvents — default: expfunc + logfunc
+        h_an_func:     h term for anions  — default: expfunc + logfunc
+        J_sol_sol_func: J term for solvent pairs — default: DN/AN cross + DN-DN + AN-AN
+        J_sol_an_func:  J term for solvent-anion — default: sol_sol_func of (dn_an, an_sol)
+        J_an_an_func:   J term for anion pairs   — default: sol_sol_func of (dn_i, dn_j)
         initial_guess: shape (N+M,), defaults to uniform 1/(N+M)
         max_tries:     number of initial guesses to try (default 10)
 
@@ -607,18 +636,38 @@ def find_root(input_params, solvents, anions, z, initial_guess=None, max_tries=1
     return _find_root_impl(
         input_params, dn_sol, an_sol, x_sol, v_sol, dn_an, x_an, v_an, z,
         initial_guess, max_tries,
+        h_sol_func=h_sol_func, h_an_func=h_an_func,
+        J_sol_sol_func=J_sol_sol_func, J_sol_an_func=J_sol_an_func,
+        J_an_an_func=J_an_an_func,
     )
 
 
-def get_root_error(vars, input_params, solvents, anions, z):
+def get_root_error(
+    vars, input_params, solvents, anions, z,
+    h_sol_func=default_h_sol,
+    h_an_func=default_h_an,
+    J_sol_sol_func=default_J_sol_sol,
+    J_sol_an_func=default_J_sol_an,
+    J_an_an_func=default_J_an_an,
+):
     """Diagnostic: returns mean-field equation residuals for given occupation fractions."""
     dn_sol, an_sol, x_sol, v_sol, dn_an, x_an, v_an = _species_props_to_arrays(solvents, anions)
     return equations(
-        vars, input_params, dn_sol, an_sol, x_sol, v_sol, dn_an, x_an, v_an, z
+        vars, input_params, dn_sol, an_sol, x_sol, v_sol, dn_an, x_an, v_an, z,
+        h_sol_func=h_sol_func, h_an_func=h_an_func,
+        J_sol_sol_func=J_sol_sol_func, J_sol_an_func=J_sol_an_func,
+        J_an_an_func=J_an_an_func,
     )
 
 
-def li_free_energy(input_params, solvents, anions, z):
+def li_free_energy(
+    input_params, solvents, anions, z,
+    h_sol_func=default_h_sol,
+    h_an_func=default_h_an,
+    J_sol_sol_func=default_J_sol_sol,
+    J_sol_an_func=default_J_sol_an,
+    J_an_an_func=default_J_an_an,
+):
     """Li+ solvation free energy for a generic N-solvent + M-anion system.
 
     Args:
@@ -626,6 +675,8 @@ def li_free_energy(input_params, solvents, anions, z):
         solvents:     dict of {name: {"dn": ..., "an": ..., "x": ..., "volume": ...}}
         anions:       dict of {name: {"dn": ..., "x": ..., "volume": ...}}
         z:            coordination number
+        h_sol_func, h_an_func, J_sol_sol_func, J_sol_an_func, J_an_an_func:
+                      injectable term functions (defaults = current physics)
 
     Returns:
         G: scalar free energy
@@ -636,8 +687,14 @@ def li_free_energy(input_params, solvents, anions, z):
     vars, _ = _find_root_impl(
         input_params, dn_sol, an_sol, x_sol, v_sol, dn_an, x_an, v_an, z,
         initial_guess, max_tries=10,
+        h_sol_func=h_sol_func, h_an_func=h_an_func,
+        J_sol_sol_func=J_sol_sol_func, J_sol_an_func=J_sol_an_func,
+        J_an_an_func=J_an_an_func,
     )
     h, J, kT = energetics(
-        vars, input_params, dn_sol, an_sol, x_sol, v_sol, dn_an, x_an, v_an, z
+        vars, input_params, dn_sol, an_sol, x_sol, v_sol, dn_an, x_an, v_an, z,
+        h_sol_func=h_sol_func, h_an_func=h_an_func,
+        J_sol_sol_func=J_sol_sol_func, J_sol_an_func=J_sol_an_func,
+        J_an_an_func=J_an_an_func,
     )
     return jnp.sum(h * z * vars)
