@@ -326,67 +326,47 @@ def _species_props_to_arrays(solvents, anions):
     return dn_sol, an_sol, x_sol, v_sol, dn_an, x_an, v_an
 
 
+# Sign masks for rescale_input_params.
+# +1 → softplus(p[i])  (force positive)
+# -1 → -softplus(p[i]) (force negative)
+#  0 → p[i] unchanged
+#
+# Read alongside the physics comments in rescale_input_params_old for context.
+_SIGNS_SOL_PARAMS_DN      = jnp.array([ 0, +1, +1, -1, -1])
+_SIGNS_SALT_PARAMS_DN     = jnp.array([ 0, +1, +1, -1, -1])
+_SIGNS_SOL_SALT_AN        = jnp.array([ 0, +1,  0, +1, +1, -1])
+_SIGNS_SOL_SOL            = jnp.array([ 0, +1,  0, +1, +1,  0,
+                                        +1,  0, -1, -1,  0, +1,
+                                         0, -1, -1, -1])
+_SIGNS_ANION_ANION        = jnp.array([ 0, +1,  0, -1, -1, -1])
+_SIGNS_CONC_FACTOR        = jnp.array([ 0, -1, +1, -1,  0, +1, +1, +1])
+
+
+def _apply_softplus(p, signs):
+    """Vectorized signed-softplus transform.
+
+    Replaces p[i] with signs[i]*softplus(p[i]) where signs[i] != 0,
+    leaving p[i] unchanged where signs[i] == 0.  Single XLA op — no
+    Python-level indexing loop.
+    """
+    return jnp.where(signs == 0, p, signs * jnn.softplus(p))
+
+
 @jax.jit
 def rescale_input_params(input_params):
     """Rescale parameters for the generic multi-species model.
 
-    Identical to rescale_input_params_old except that it handles
-    params_anion_anion (6 elements, sol_sol_func form) instead of
-    params_salt (5 elements, expfunc form).
+    Each parameter array has a corresponding sign-mask (_SIGNS_*) that
+    encodes which indices must be forced positive (+1), negative (-1),
+    or left free (0).  _apply_softplus applies the transform in one
+    vectorized pass instead of per-index .at[].set() calls.
     """
-    sol_params_dn_tmp      = input_params["sol_params_dn"]
-    salt_params_dn_tmp     = input_params["salt_params_dn"]
-    params_sol_salt_an_tmp = input_params["params_sol_salt_an"]
-    params_sol_sol_tmp     = input_params["params_sol_sol"]
-    params_anion_anion_tmp = input_params["params_anion_anion"]
-    conc_factor_sol        = input_params["conc_factor_sol"]
-
-    # Li-solvent h: strictly decreasing with DN
-    sol_params_dn_tmp = sol_params_dn_tmp.at[1].set(jnn.softplus(sol_params_dn_tmp[1]))
-    sol_params_dn_tmp = sol_params_dn_tmp.at[2].set(jnn.softplus(sol_params_dn_tmp[2]))
-    sol_params_dn_tmp = sol_params_dn_tmp.at[3].set(-jnn.softplus(sol_params_dn_tmp[3]))
-    sol_params_dn_tmp = sol_params_dn_tmp.at[4].set(-jnn.softplus(sol_params_dn_tmp[4]))
-    # Li-anion h: strictly decreasing with DN
-    salt_params_dn_tmp = salt_params_dn_tmp.at[1].set(jnn.softplus(salt_params_dn_tmp[1]))
-    salt_params_dn_tmp = salt_params_dn_tmp.at[2].set(jnn.softplus(salt_params_dn_tmp[2]))
-    salt_params_dn_tmp = salt_params_dn_tmp.at[3].set(-jnn.softplus(salt_params_dn_tmp[3]))
-    salt_params_dn_tmp = salt_params_dn_tmp.at[4].set(-jnn.softplus(salt_params_dn_tmp[4]))
-    # J(sol-anion): strictly decreasing with DN and AN
-    params_sol_salt_an_tmp = params_sol_salt_an_tmp.at[1].set(jnn.softplus(params_sol_salt_an_tmp[1]))
-    params_sol_salt_an_tmp = params_sol_salt_an_tmp.at[3].set(jnn.softplus(params_sol_salt_an_tmp[3]))
-    params_sol_salt_an_tmp = params_sol_salt_an_tmp.at[4].set(jnn.softplus(params_sol_salt_an_tmp[4]))
-    params_sol_salt_an_tmp = params_sol_salt_an_tmp.at[5].set(-jnn.softplus(params_sol_salt_an_tmp[5]))
-    # J(sol-sol): DN-AN part decreasing; DN-DN and AN-AN parts increasing
-    params_sol_sol_tmp = params_sol_sol_tmp.at[1].set(jnn.softplus(params_sol_sol_tmp[1]))
-    params_sol_sol_tmp = params_sol_sol_tmp.at[3].set(jnn.softplus(params_sol_sol_tmp[3]))
-    params_sol_sol_tmp = params_sol_sol_tmp.at[4].set(jnn.softplus(params_sol_sol_tmp[4]))
-    params_sol_sol_tmp = params_sol_sol_tmp.at[6].set(jnn.softplus(params_sol_sol_tmp[6]))
-    params_sol_sol_tmp = params_sol_sol_tmp.at[8].set(-jnn.softplus(params_sol_sol_tmp[8]))
-    params_sol_sol_tmp = params_sol_sol_tmp.at[9].set(-jnn.softplus(params_sol_sol_tmp[9]))
-    params_sol_sol_tmp = params_sol_sol_tmp.at[11].set(jnn.softplus(params_sol_sol_tmp[11]))
-    params_sol_sol_tmp = params_sol_sol_tmp.at[13].set(-jnn.softplus(params_sol_sol_tmp[13]))
-    params_sol_sol_tmp = params_sol_sol_tmp.at[14].set(-jnn.softplus(params_sol_sol_tmp[14]))
-    params_sol_sol_tmp = params_sol_sol_tmp.at[15].set(-jnn.softplus(params_sol_sol_tmp[15]))
-    # J(anion-anion): sol_sol_func with DN-DN inputs, increasing with DN
-    # H0 positive (idx 1), a1/a2 negative (idx 3, 4), logfunc term negative (idx 5)
-    params_anion_anion_tmp = params_anion_anion_tmp.at[1].set(jnn.softplus(params_anion_anion_tmp[1]))
-    params_anion_anion_tmp = params_anion_anion_tmp.at[3].set(-jnn.softplus(params_anion_anion_tmp[3]))
-    params_anion_anion_tmp = params_anion_anion_tmp.at[4].set(-jnn.softplus(params_anion_anion_tmp[4]))
-    params_anion_anion_tmp = params_anion_anion_tmp.at[5].set(-jnn.softplus(params_anion_anion_tmp[5]))
-    # conc_factor_sol: unchanged
-    conc_factor_sol = conc_factor_sol.at[1].set(-jnn.softplus(conc_factor_sol[1]))
-    conc_factor_sol = conc_factor_sol.at[2].set(jnn.softplus(conc_factor_sol[2]))
-    conc_factor_sol = conc_factor_sol.at[3].set(-jnn.softplus(conc_factor_sol[3]))
-    conc_factor_sol = conc_factor_sol.at[5].set(jnn.softplus(conc_factor_sol[5]))
-    conc_factor_sol = conc_factor_sol.at[6].set(jnn.softplus(conc_factor_sol[6]))
-    conc_factor_sol = conc_factor_sol.at[7].set(jnn.softplus(conc_factor_sol[7]))
-
-    input_params["sol_params_dn"]      = sol_params_dn_tmp
-    input_params["salt_params_dn"]     = salt_params_dn_tmp
-    input_params["params_sol_salt_an"] = params_sol_salt_an_tmp
-    input_params["params_sol_sol"]     = params_sol_sol_tmp
-    input_params["params_anion_anion"] = params_anion_anion_tmp
-    input_params["conc_factor_sol"]    = conc_factor_sol
+    input_params["sol_params_dn"]      = _apply_softplus(input_params["sol_params_dn"],      _SIGNS_SOL_PARAMS_DN)
+    input_params["salt_params_dn"]     = _apply_softplus(input_params["salt_params_dn"],     _SIGNS_SALT_PARAMS_DN)
+    input_params["params_sol_salt_an"] = _apply_softplus(input_params["params_sol_salt_an"], _SIGNS_SOL_SALT_AN)
+    input_params["params_sol_sol"]     = _apply_softplus(input_params["params_sol_sol"],     _SIGNS_SOL_SOL)
+    input_params["params_anion_anion"] = _apply_softplus(input_params["params_anion_anion"], _SIGNS_ANION_ANION)
+    input_params["conc_factor_sol"]    = _apply_softplus(input_params["conc_factor_sol"],    _SIGNS_CONC_FACTOR)
     return input_params
 
 
