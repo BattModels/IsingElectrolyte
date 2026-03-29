@@ -95,7 +95,28 @@ def polynomial_func(x, params, n=2):
 #                 x_an, params)               → scalar
 #   J_an_an_func(dn_i, x_i, dn_j, x_j,
 #                params)                      → scalar
+#
+# Each default_* function is paired with a companion default_*_rescale
+# that knows the sign pattern for that function's parameters.  Pass a
+# custom *_rescale alongside a custom term function when injecting new
+# physics — see rescale_input_params in model.py.
+#
+#   rescale_func(params, monotonicity: str) → params
+#     monotonicity ∈ {"decrease", "increase", "none"}
 # ---------------------------------------------------------------------------
+
+
+def _apply_softplus(p, signs):
+    """Vectorized signed-softplus transform.
+
+    Replaces p[i] with signs[i]*softplus(p[i]) where signs[i] != 0,
+    leaving p[i] unchanged where signs[i] == 0.  Single XLA op.
+
+      signs[i] = +1  →  softplus(p[i])   (force positive)
+      signs[i] = -1  → -softplus(p[i])   (force negative)
+      signs[i] =  0  →  p[i]             (unconstrained)
+    """
+    return jnp.where(signs == 0, p, signs * jax.nn.softplus(p))
 
 def default_h_sol(dn_eff, x, params):
     """Li-solvent h term: logistic function of effective DN + log of molar ratio.
@@ -166,3 +187,103 @@ def default_J_an_an(dn_i, x_i, dn_j, x_j, params):
         + logfunc(x_i, params[5])
         + logfunc(x_j, params[5])
     )
+
+
+# ---------------------------------------------------------------------------
+# Companion rescaling functions
+#
+# Each default_*_rescale(params, monotonicity) applies signed softplus to the
+# parameter array for its term function.  The sign pattern encodes the physical
+# constraint — which indices must be positive/negative to enforce the requested
+# monotonicity direction.
+#
+# When you define a custom term function with different parameter semantics,
+# define a matching custom_*_rescale and pass both to find_root / energetics.
+# ---------------------------------------------------------------------------
+
+def default_h_sol_rescale(params, monotonicity):
+    """Rescaling for default_h_sol — 5 params: expfunc[:4] + logfunc[4].
+
+    "decrease": h decreases with DN — params[3], params[4] forced negative.
+    "increase": h increases with DN — params[3] forced positive.
+    "none":     no constraint applied.
+    """
+    if monotonicity == "decrease":
+        signs = jnp.array([ 0, +1, +1, -1, -1])
+    elif monotonicity == "increase":
+        signs = jnp.array([ 0, +1, +1, +1, -1])
+    else:
+        signs = jnp.zeros(5, dtype=int)
+    return _apply_softplus(params, signs)
+
+
+def default_h_an_rescale(params, monotonicity):
+    """Rescaling for default_h_an — 5 params: same layout as default_h_sol."""
+    if monotonicity == "decrease":
+        signs = jnp.array([ 0, +1, +1, -1, -1])
+    elif monotonicity == "increase":
+        signs = jnp.array([ 0, +1, +1, +1, -1])
+    else:
+        signs = jnp.zeros(5, dtype=int)
+    return _apply_softplus(params, signs)
+
+
+def default_J_sol_sol_rescale(params, monotonicity):
+    """Rescaling for default_J_sol_sol — 16 params.
+
+    Layout: [:5] DN-AN cross, [5:10] DN-DN, [10:15] AN-AN, [15] logfunc.
+    "decrease": DN-AN cross decreasing; DN-DN and AN-AN increasing.
+    "increase": all sub-terms increasing.
+    """
+    if monotonicity == "decrease":
+        signs = jnp.array([ 0, +1, 0, +1, +1,  0, +1, 0, -1, -1,  0, +1, 0, -1, -1, -1])
+    elif monotonicity == "increase":
+        signs = jnp.array([ 0, +1, 0, -1, -1,  0, +1, 0, -1, -1,  0, +1, 0, -1, -1, -1])
+    else:
+        signs = jnp.zeros(16, dtype=int)
+    return _apply_softplus(params, signs)
+
+
+def default_J_sol_an_rescale(params, monotonicity):
+    """Rescaling for default_J_sol_an — 6 params: sol_sol_func[:5] + logfunc[5].
+
+    "decrease": J decreases with DN and AN.
+    "increase": J increases with DN and AN.
+    """
+    if monotonicity == "decrease":
+        signs = jnp.array([ 0, +1, 0, +1, +1, -1])
+    elif monotonicity == "increase":
+        signs = jnp.array([ 0, +1, 0, -1, -1, -1])
+    else:
+        signs = jnp.zeros(6, dtype=int)
+    return _apply_softplus(params, signs)
+
+
+def default_J_an_an_rescale(params, monotonicity):
+    """Rescaling for default_J_an_an — 6 params: sol_sol_func[:5] + logfunc[5].
+
+    "increase": J increases with DN (default physics for anion-anion).
+    "decrease": J decreases with DN.
+    """
+    if monotonicity == "increase":
+        signs = jnp.array([ 0, +1, 0, -1, -1, -1])
+    elif monotonicity == "decrease":
+        signs = jnp.array([ 0, +1, 0, +1, +1, -1])
+    else:
+        signs = jnp.zeros(6, dtype=int)
+    return _apply_softplus(params, signs)
+
+
+def default_conc_factor_rescale(params, monotonicity):
+    """Rescaling for conc_factor_sol — 8 params.
+
+    "increase": concentration factor increases with x and V (default).
+    "decrease": concentration factor decreases with x and V.
+    """
+    if monotonicity == "increase":
+        signs = jnp.array([ 0, -1, +1, -1,  0, +1, +1, +1])
+    elif monotonicity == "decrease":
+        signs = jnp.array([ 0, +1, +1, +1,  0, +1, +1, +1])
+    else:
+        signs = jnp.zeros(8, dtype=int)
+    return _apply_softplus(params, signs)

@@ -5,11 +5,25 @@ import numpy as np
 import jax
 import jax.numpy as jnp
 
-from ..model import _find_root_impl, energetics
+from functools import partial
+from ..model import _find_root_impl, energetics, DEFAULT_MONOTONICITY, _freeze_mono
+from ..interactions import (
+    default_h_sol_rescale, default_h_an_rescale,
+    default_J_sol_sol_rescale, default_J_sol_an_rescale, default_J_an_an_rescale,
+    default_conc_factor_rescale,
+)
 from . import solvent_map_dict
 
 
-def frac_occupation(input_params):
+def frac_occupation(
+    input_params, monotonicity_dict=DEFAULT_MONOTONICITY,
+    rescale_h_sol=default_h_sol_rescale,
+    rescale_h_an=default_h_an_rescale,
+    rescale_J_sol_sol=default_J_sol_sol_rescale,
+    rescale_J_sol_an=default_J_sol_an_rescale,
+    rescale_J_an_an=default_J_an_an_rescale,
+    rescale_conc_factor=default_conc_factor_rescale,
+):
     """Fractional occupation of each species as a function of solvent 1 and solvent 2 DN.
 
     Sweeps DN of both solvents over a 2D grid, with all other properties fixed to
@@ -46,6 +60,10 @@ def frac_occupation(input_params):
         roots, _ = _find_root_impl(
             input_params, dn_sol, an_sol, x_sol, v_sol, dn_an, x_an, v_an_, z,
             init_guess, max_tries=10,
+            monotonicity_dict=monotonicity_dict,
+            rescale_h_sol=rescale_h_sol, rescale_h_an=rescale_h_an,
+            rescale_J_sol_sol=rescale_J_sol_sol, rescale_J_sol_an=rescale_J_sol_an,
+            rescale_J_an_an=rescale_J_an_an, rescale_conc_factor=rescale_conc_factor,
         )
         return roots
 
@@ -106,7 +124,15 @@ def frac_occupation(input_params):
     np.save("roots.npy", roots)
 
 
-def occupations_dn2_an2_csv(trained_params):
+def occupations_dn2_an2_csv(
+    trained_params, monotonicity_dict=DEFAULT_MONOTONICITY,
+    rescale_h_sol=default_h_sol_rescale,
+    rescale_h_an=default_h_an_rescale,
+    rescale_J_sol_sol=default_J_sol_sol_rescale,
+    rescale_J_sol_an=default_J_sol_an_rescale,
+    rescale_J_an_an=default_J_an_an_rescale,
+    rescale_conc_factor=default_conc_factor_rescale,
+):
     """Occupation as a function of solvent 2 DN and AN; solvent 1 fixed to DME properties."""
     dn0      = 20.0
     an0      = 10.2
@@ -136,6 +162,10 @@ def occupations_dn2_an2_csv(trained_params):
         roots, _ = _find_root_impl(
             trained_params, dn_sol, an_sol, x_sol, v_sol, dn_an, x_an, v_an_, z,
             init_guess, max_tries=10,
+            monotonicity_dict=monotonicity_dict,
+            rescale_h_sol=rescale_h_sol, rescale_h_an=rescale_h_an,
+            rescale_J_sol_sol=rescale_J_sol_sol, rescale_J_sol_an=rescale_J_sol_an,
+            rescale_J_an_an=rescale_J_an_an, rescale_conc_factor=rescale_conc_factor,
         )
         return roots
 
@@ -174,7 +204,15 @@ def occupations_dn2_an2_csv(trained_params):
     df.to_csv("occupations_dn2_an2_contour.csv", index=False)
 
 
-def occupations_dn2_an2_contour(trained_params):
+def occupations_dn2_an2_contour(
+    trained_params, monotonicity_dict=DEFAULT_MONOTONICITY,
+    rescale_h_sol=default_h_sol_rescale,
+    rescale_h_an=default_h_an_rescale,
+    rescale_J_sol_sol=default_J_sol_sol_rescale,
+    rescale_J_sol_an=default_J_sol_an_rescale,
+    rescale_J_an_an=default_J_an_an_rescale,
+    rescale_conc_factor=default_conc_factor_rescale,
+):
     """Line plots of occupation vs. solvent 2 DN for several fixed AN values."""
     dn0, an0 = 20.0, 10.2
     dn1      = jnp.linspace(1.0, 40, 100)
@@ -205,6 +243,10 @@ def occupations_dn2_an2_contour(trained_params):
             roots, _ = _find_root_impl(
                 trained_params, dn_sol, an_sol, x_sol, v_sol, dn_an, x_an, v_an_, z,
                 init_guess, max_tries=10,
+                monotonicity_dict=monotonicity_dict,
+                rescale_h_sol=rescale_h_sol, rescale_h_an=rescale_h_an,
+                rescale_J_sol_sol=rescale_J_sol_sol, rescale_J_sol_an=rescale_J_sol_an,
+                rescale_J_an_an=rescale_J_an_an, rescale_conc_factor=rescale_conc_factor,
             )
             return roots
 
@@ -224,7 +266,15 @@ def occupations_dn2_an2_contour(trained_params):
     plt.savefig("occpupations_dn2_an2.png", bbox_inches="tight")
 
 
-def visualize_li_free_energy_contour(trained_params):
+def visualize_li_free_energy_contour(
+    trained_params, monotonicity_dict=DEFAULT_MONOTONICITY,
+    rescale_h_sol=default_h_sol_rescale,
+    rescale_h_an=default_h_an_rescale,
+    rescale_J_sol_sol=default_J_sol_sol_rescale,
+    rescale_J_sol_an=default_J_sol_an_rescale,
+    rescale_J_an_an=default_J_an_an_rescale,
+    rescale_conc_factor=default_conc_factor_rescale,
+):
     """Li solvation free energy as a 2D contour over solvent 1 and solvent 2 DN."""
     dn1      = jnp.linspace(1.0, 40, 100)
     dn2      = jnp.linspace(1.0, 40, 100)
@@ -254,9 +304,17 @@ def visualize_li_free_energy_contour(trained_params):
         vars, _ = _find_root_impl(
             trained_params, dn_sol, an_sol, x_sol, v_sol, dn_an, x_an, v_an_, z,
             init_guess, max_tries=10,
+            monotonicity_dict=monotonicity_dict,
+            rescale_h_sol=rescale_h_sol, rescale_h_an=rescale_h_an,
+            rescale_J_sol_sol=rescale_J_sol_sol, rescale_J_sol_an=rescale_J_sol_an,
+            rescale_J_an_an=rescale_J_an_an, rescale_conc_factor=rescale_conc_factor,
         )
         h, J, kT = energetics(
-            vars, trained_params, dn_sol, an_sol, x_sol, v_sol, dn_an, x_an, v_an_, z
+            vars, trained_params, dn_sol, an_sol, x_sol, v_sol, dn_an, x_an, v_an_, z,
+            monotonicity_dict=monotonicity_dict,
+            rescale_h_sol=rescale_h_sol, rescale_h_an=rescale_h_an,
+            rescale_J_sol_sol=rescale_J_sol_sol, rescale_J_sol_an=rescale_J_sol_an,
+            rescale_J_an_an=rescale_J_an_an, rescale_conc_factor=rescale_conc_factor,
         )
         return jnp.sum(h * z * vars)
 
@@ -276,7 +334,15 @@ def visualize_li_free_energy_contour(trained_params):
     plt.savefig("li_free_energy_contour.png", dpi=300, bbox_inches="tight")
 
 
-def visualize_li_free_energy_dn_an_contour(trained_params):
+def visualize_li_free_energy_dn_an_contour(
+    trained_params, monotonicity_dict=DEFAULT_MONOTONICITY,
+    rescale_h_sol=default_h_sol_rescale,
+    rescale_h_an=default_h_an_rescale,
+    rescale_J_sol_sol=default_J_sol_sol_rescale,
+    rescale_J_sol_an=default_J_sol_an_rescale,
+    rescale_J_an_an=default_J_an_an_rescale,
+    rescale_conc_factor=default_conc_factor_rescale,
+):
     """Li solvation free energy as a 2D contour over solvent 2 DN and AN."""
     dn0      = 20.0
     an0      = 10.2
@@ -306,9 +372,17 @@ def visualize_li_free_energy_dn_an_contour(trained_params):
         vars, _ = _find_root_impl(
             trained_params, dn_sol, an_sol, x_sol, v_sol, dn_an, x_an, v_an_, z,
             init_guess, max_tries=10,
+            monotonicity_dict=monotonicity_dict,
+            rescale_h_sol=rescale_h_sol, rescale_h_an=rescale_h_an,
+            rescale_J_sol_sol=rescale_J_sol_sol, rescale_J_sol_an=rescale_J_sol_an,
+            rescale_J_an_an=rescale_J_an_an, rescale_conc_factor=rescale_conc_factor,
         )
         h, J, kT = energetics(
-            vars, trained_params, dn_sol, an_sol, x_sol, v_sol, dn_an, x_an, v_an_, z
+            vars, trained_params, dn_sol, an_sol, x_sol, v_sol, dn_an, x_an, v_an_, z,
+            monotonicity_dict=monotonicity_dict,
+            rescale_h_sol=rescale_h_sol, rescale_h_an=rescale_h_an,
+            rescale_J_sol_sol=rescale_J_sol_sol, rescale_J_sol_an=rescale_J_sol_an,
+            rescale_J_an_an=rescale_J_an_an, rescale_conc_factor=rescale_conc_factor,
         )
         return jnp.sum(h * z * vars)
 

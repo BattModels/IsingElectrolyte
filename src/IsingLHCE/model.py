@@ -8,11 +8,50 @@ from .interactions import (
     expfunc, logfunc, sol_sol_func,
     default_h_sol, default_h_an,
     default_J_sol_sol, default_J_sol_an, default_J_an_an,
+    default_h_sol_rescale, default_h_an_rescale,
+    default_J_sol_sol_rescale, default_J_sol_an_rescale, default_J_an_an_rescale,
+    default_conc_factor_rescale,
 )
 from .conc_vol_correction import conc_factor_sep_x_v_sigmoid
 
 jax.config.update("jax_enable_x64", True)
 jax.config.update("jax_disable_jit", False)
+
+# ---------------------------------------------------------------------------
+# Monotonicity configuration
+# ---------------------------------------------------------------------------
+
+#: Default monotonicity constraints for each parameter group.
+#: Pass a modified copy of this dict as ``monotonicity_dict`` to any top-level
+#: function (``find_root``, ``li_free_energy``, ``get_root_error``, …) to
+#: experiment with different physical assumptions without touching the code.
+#:
+#: Allowed values per key:
+#:   "decrease" — the interaction strength decreases as the descriptor increases
+#:   "increase" — the interaction strength increases as the descriptor increases
+#:   "none"     — no monotonicity constraint; parameters are left unconstrained
+DEFAULT_MONOTONICITY = {
+    "sol_params_dn":      "decrease",   # h(Li-sol) decreases with DN
+    "salt_params_dn":     "decrease",   # h(Li-anion) decreases with DN
+    "params_sol_salt_an": "decrease",   # J(sol-anion) decreases with DN/AN
+    "params_sol_sol":     "decrease",   # J(sol-sol) decreases with DN/AN cross
+    "params_anion_anion": "increase",   # J(anion-anion) increases with DN
+    "conc_factor_sol":    "increase",   # concentration factor increases with x, V
+}
+
+
+def _freeze_mono(d):
+    """Convert a monotonicity dict to a hashable frozenset for JAX static args.
+
+    JAX requires static arguments to be hashable.  Plain Python dicts are not,
+    so we convert to ``frozenset(d.items())`` at every JIT boundary.  The
+    inverse (``dict(frozen)``) is used inside ``rescale_input_params`` for the
+    string lookups.  Users always interact with plain dicts.
+    """
+    if isinstance(d, frozenset):
+        return d
+    return frozenset(d.items())
+
 
 # ---------------------------------------------------------------------------
 # Legacy fixed-species functions (2 solvents + 1 anion)
@@ -326,67 +365,48 @@ def _species_props_to_arrays(solvents, anions):
     return dn_sol, an_sol, x_sol, v_sol, dn_an, x_an, v_an
 
 
-@jax.jit
-def rescale_input_params(input_params):
+@partial(jax.jit, static_argnames=(
+    "monotonicity_dict",
+    "rescale_h_sol", "rescale_h_an",
+    "rescale_J_sol_sol", "rescale_J_sol_an", "rescale_J_an_an",
+    "rescale_conc_factor",
+))
+def rescale_input_params(
+    input_params,
+    monotonicity_dict=None,
+    rescale_h_sol=default_h_sol_rescale,
+    rescale_h_an=default_h_an_rescale,
+    rescale_J_sol_sol=default_J_sol_sol_rescale,
+    rescale_J_sol_an=default_J_sol_an_rescale,
+    rescale_J_an_an=default_J_an_an_rescale,
+    rescale_conc_factor=default_conc_factor_rescale,
+):
     """Rescale parameters for the generic multi-species model.
 
-    Identical to rescale_input_params_old except that it handles
-    params_anion_anion (6 elements, sol_sol_func form) instead of
-    params_salt (5 elements, expfunc form).
+    A generic dispatcher: each parameter group is rescaled by its own injected
+    function, defaulting to the companions of the default h/J term functions.
+    When you inject a custom term function with different parameter semantics,
+    pass a matching custom_*_rescale alongside it.
+
+    Args:
+        input_params:      parameter dict (sol_params_dn, salt_params_dn,
+                           params_sol_salt_an, params_sol_sol,
+                           params_anion_anion, conc_factor_sol).
+        monotonicity_dict: frozenset from _freeze_mono(), or None → DEFAULT_MONOTONICITY.
+        rescale_h_sol:     rescaling function for sol_params_dn.
+        rescale_h_an:      rescaling function for salt_params_dn.
+        rescale_J_sol_sol: rescaling function for params_sol_sol.
+        rescale_J_sol_an:  rescaling function for params_sol_salt_an.
+        rescale_J_an_an:   rescaling function for params_anion_anion.
+        rescale_conc_factor: rescaling function for conc_factor_sol.
     """
-    sol_params_dn_tmp      = input_params["sol_params_dn"]
-    salt_params_dn_tmp     = input_params["salt_params_dn"]
-    params_sol_salt_an_tmp = input_params["params_sol_salt_an"]
-    params_sol_sol_tmp     = input_params["params_sol_sol"]
-    params_anion_anion_tmp = input_params["params_anion_anion"]
-    conc_factor_sol        = input_params["conc_factor_sol"]
-
-    # Li-solvent h: strictly decreasing with DN
-    sol_params_dn_tmp = sol_params_dn_tmp.at[1].set(jnn.softplus(sol_params_dn_tmp[1]))
-    sol_params_dn_tmp = sol_params_dn_tmp.at[2].set(jnn.softplus(sol_params_dn_tmp[2]))
-    sol_params_dn_tmp = sol_params_dn_tmp.at[3].set(-jnn.softplus(sol_params_dn_tmp[3]))
-    sol_params_dn_tmp = sol_params_dn_tmp.at[4].set(-jnn.softplus(sol_params_dn_tmp[4]))
-    # Li-anion h: strictly decreasing with DN
-    salt_params_dn_tmp = salt_params_dn_tmp.at[1].set(jnn.softplus(salt_params_dn_tmp[1]))
-    salt_params_dn_tmp = salt_params_dn_tmp.at[2].set(jnn.softplus(salt_params_dn_tmp[2]))
-    salt_params_dn_tmp = salt_params_dn_tmp.at[3].set(-jnn.softplus(salt_params_dn_tmp[3]))
-    salt_params_dn_tmp = salt_params_dn_tmp.at[4].set(-jnn.softplus(salt_params_dn_tmp[4]))
-    # J(sol-anion): strictly decreasing with DN and AN
-    params_sol_salt_an_tmp = params_sol_salt_an_tmp.at[1].set(jnn.softplus(params_sol_salt_an_tmp[1]))
-    params_sol_salt_an_tmp = params_sol_salt_an_tmp.at[3].set(jnn.softplus(params_sol_salt_an_tmp[3]))
-    params_sol_salt_an_tmp = params_sol_salt_an_tmp.at[4].set(jnn.softplus(params_sol_salt_an_tmp[4]))
-    params_sol_salt_an_tmp = params_sol_salt_an_tmp.at[5].set(-jnn.softplus(params_sol_salt_an_tmp[5]))
-    # J(sol-sol): DN-AN part decreasing; DN-DN and AN-AN parts increasing
-    params_sol_sol_tmp = params_sol_sol_tmp.at[1].set(jnn.softplus(params_sol_sol_tmp[1]))
-    params_sol_sol_tmp = params_sol_sol_tmp.at[3].set(jnn.softplus(params_sol_sol_tmp[3]))
-    params_sol_sol_tmp = params_sol_sol_tmp.at[4].set(jnn.softplus(params_sol_sol_tmp[4]))
-    params_sol_sol_tmp = params_sol_sol_tmp.at[6].set(jnn.softplus(params_sol_sol_tmp[6]))
-    params_sol_sol_tmp = params_sol_sol_tmp.at[8].set(-jnn.softplus(params_sol_sol_tmp[8]))
-    params_sol_sol_tmp = params_sol_sol_tmp.at[9].set(-jnn.softplus(params_sol_sol_tmp[9]))
-    params_sol_sol_tmp = params_sol_sol_tmp.at[11].set(jnn.softplus(params_sol_sol_tmp[11]))
-    params_sol_sol_tmp = params_sol_sol_tmp.at[13].set(-jnn.softplus(params_sol_sol_tmp[13]))
-    params_sol_sol_tmp = params_sol_sol_tmp.at[14].set(-jnn.softplus(params_sol_sol_tmp[14]))
-    params_sol_sol_tmp = params_sol_sol_tmp.at[15].set(-jnn.softplus(params_sol_sol_tmp[15]))
-    # J(anion-anion): sol_sol_func with DN-DN inputs, increasing with DN
-    # H0 positive (idx 1), a1/a2 negative (idx 3, 4), logfunc term negative (idx 5)
-    params_anion_anion_tmp = params_anion_anion_tmp.at[1].set(jnn.softplus(params_anion_anion_tmp[1]))
-    params_anion_anion_tmp = params_anion_anion_tmp.at[3].set(-jnn.softplus(params_anion_anion_tmp[3]))
-    params_anion_anion_tmp = params_anion_anion_tmp.at[4].set(-jnn.softplus(params_anion_anion_tmp[4]))
-    params_anion_anion_tmp = params_anion_anion_tmp.at[5].set(-jnn.softplus(params_anion_anion_tmp[5]))
-    # conc_factor_sol: unchanged
-    conc_factor_sol = conc_factor_sol.at[1].set(-jnn.softplus(conc_factor_sol[1]))
-    conc_factor_sol = conc_factor_sol.at[2].set(jnn.softplus(conc_factor_sol[2]))
-    conc_factor_sol = conc_factor_sol.at[3].set(-jnn.softplus(conc_factor_sol[3]))
-    conc_factor_sol = conc_factor_sol.at[5].set(jnn.softplus(conc_factor_sol[5]))
-    conc_factor_sol = conc_factor_sol.at[6].set(jnn.softplus(conc_factor_sol[6]))
-    conc_factor_sol = conc_factor_sol.at[7].set(jnn.softplus(conc_factor_sol[7]))
-
-    input_params["sol_params_dn"]      = sol_params_dn_tmp
-    input_params["salt_params_dn"]     = salt_params_dn_tmp
-    input_params["params_sol_salt_an"] = params_sol_salt_an_tmp
-    input_params["params_sol_sol"]     = params_sol_sol_tmp
-    input_params["params_anion_anion"] = params_anion_anion_tmp
-    input_params["conc_factor_sol"]    = conc_factor_sol
+    mono = dict(monotonicity_dict) if monotonicity_dict is not None else DEFAULT_MONOTONICITY
+    input_params["sol_params_dn"]      = rescale_h_sol(      input_params["sol_params_dn"],      mono["sol_params_dn"])
+    input_params["salt_params_dn"]     = rescale_h_an(       input_params["salt_params_dn"],     mono["salt_params_dn"])
+    input_params["params_sol_salt_an"] = rescale_J_sol_an(   input_params["params_sol_salt_an"], mono["params_sol_salt_an"])
+    input_params["params_sol_sol"]     = rescale_J_sol_sol(  input_params["params_sol_sol"],     mono["params_sol_sol"])
+    input_params["params_anion_anion"] = rescale_J_an_an(    input_params["params_anion_anion"], mono["params_anion_anion"])
+    input_params["conc_factor_sol"]    = rescale_conc_factor(input_params["conc_factor_sol"],    mono["conc_factor_sol"])
     return input_params
 
 
@@ -397,6 +417,13 @@ def energetics(
     J_sol_sol_func=default_J_sol_sol,
     J_sol_an_func=default_J_sol_an,
     J_an_an_func=default_J_an_an,
+    monotonicity_dict=None,
+    rescale_h_sol=default_h_sol_rescale,
+    rescale_h_an=default_h_an_rescale,
+    rescale_J_sol_sol=default_J_sol_sol_rescale,
+    rescale_J_sol_an=default_J_sol_an_rescale,
+    rescale_J_an_an=default_J_an_an_rescale,
+    rescale_conc_factor=default_conc_factor_rescale,
 ):
     """Compute h and J for a generic N-solvent + M-anion Ising model.
 
@@ -418,6 +445,10 @@ def energetics(
         J_sol_sol_func: callable(dn_i, an_i, x_i, dn_j, an_j, x_j, params) → scalar
         J_sol_an_func:  callable(dn_an, an_sol, x_sol, x_an, params) → scalar
         J_an_an_func:   callable(dn_i, x_i, dn_j, x_j, params) → scalar
+        monotonicity_dict: frozenset from _freeze_mono(), or None for default.
+        rescale_h_sol, rescale_h_an, rescale_J_sol_sol, rescale_J_sol_an,
+        rescale_J_an_an, rescale_conc_factor:
+                       companion rescaling functions for each parameter group.
 
     Returns:
         h:   single-particle energies, shape (N+M,)
@@ -425,7 +456,13 @@ def energetics(
         kT:  thermal energy (scalar)
     """
     kT = 0.0257
-    input_params = rescale_input_params(input_params)
+    input_params = rescale_input_params(
+        input_params,
+        monotonicity_dict=monotonicity_dict,
+        rescale_h_sol=rescale_h_sol, rescale_h_an=rescale_h_an,
+        rescale_J_sol_sol=rescale_J_sol_sol, rescale_J_sol_an=rescale_J_sol_an,
+        rescale_J_an_an=rescale_J_an_an, rescale_conc_factor=rescale_conc_factor,
+    )
 
     sol_params_dn_tmp      = input_params["sol_params_dn"]
     salt_params_dn_tmp     = input_params["salt_params_dn"]
@@ -502,17 +539,27 @@ def equations(
     J_sol_sol_func=default_J_sol_sol,
     J_sol_an_func=default_J_sol_an,
     J_an_an_func=default_J_an_an,
+    monotonicity_dict=None,
+    rescale_h_sol=default_h_sol_rescale,
+    rescale_h_an=default_h_an_rescale,
+    rescale_J_sol_sol=default_J_sol_sol_rescale,
+    rescale_J_sol_an=default_J_sol_an_rescale,
+    rescale_J_an_an=default_J_an_an_rescale,
+    rescale_conc_factor=default_conc_factor_rescale,
 ):
     """Mean-field self-consistency equations for N-solvent + M-anion Ising model.
 
     Returns residuals f_i = exp_i / Z - vars_i for each species i.
-    Term functions are passed through to energetics unchanged.
+    All term and rescaling functions are passed through to energetics unchanged.
     """
     h, J, kT = energetics(
         vars, input_params, dn_sol, an_sol, x_sol, v_sol, dn_an, x_an, v_an, z,
         h_sol_func=h_sol_func, h_an_func=h_an_func,
         J_sol_sol_func=J_sol_sol_func, J_sol_an_func=J_sol_an_func,
-        J_an_an_func=J_an_an_func,
+        J_an_an_func=J_an_an_func, monotonicity_dict=monotonicity_dict,
+        rescale_h_sol=rescale_h_sol, rescale_h_an=rescale_h_an,
+        rescale_J_sol_sol=rescale_J_sol_sol, rescale_J_sol_an=rescale_J_sol_an,
+        rescale_J_an_an=rescale_J_an_an, rescale_conc_factor=rescale_conc_factor,
     )
     energies = -(h + (z / 2.0) * (J @ vars + jnp.diag(J) * vars)) / kT
     exps = jnp.exp(energies)
@@ -523,6 +570,10 @@ def equations(
     "max_tries",
     "h_sol_func", "h_an_func",
     "J_sol_sol_func", "J_sol_an_func", "J_an_an_func",
+    "monotonicity_dict",
+    "rescale_h_sol", "rescale_h_an",
+    "rescale_J_sol_sol", "rescale_J_sol_an", "rescale_J_an_an",
+    "rescale_conc_factor",
 ))
 def _find_root_impl(
     input_params, dn_sol, an_sol, x_sol, v_sol, dn_an, x_an, v_an, z,
@@ -532,6 +583,13 @@ def _find_root_impl(
     J_sol_sol_func=default_J_sol_sol,
     J_sol_an_func=default_J_sol_an,
     J_an_an_func=default_J_an_an,
+    monotonicity_dict=None,
+    rescale_h_sol=default_h_sol_rescale,
+    rescale_h_an=default_h_an_rescale,
+    rescale_J_sol_sol=default_J_sol_sol_rescale,
+    rescale_J_sol_an=default_J_sol_an_rescale,
+    rescale_J_an_an=default_J_an_an_rescale,
+    rescale_conc_factor=default_conc_factor_rescale,
 ):
     """JIT-compiled multi-start Broyden solver.
 
@@ -543,7 +601,10 @@ def _find_root_impl(
         equations,
         h_sol_func=h_sol_func, h_an_func=h_an_func,
         J_sol_sol_func=J_sol_sol_func, J_sol_an_func=J_sol_an_func,
-        J_an_an_func=J_an_an_func,
+        J_an_an_func=J_an_an_func, monotonicity_dict=monotonicity_dict,
+        rescale_h_sol=rescale_h_sol, rescale_h_an=rescale_h_an,
+        rescale_J_sol_sol=rescale_J_sol_sol, rescale_J_sol_an=rescale_J_sol_an,
+        rescale_J_an_an=rescale_J_an_an, rescale_conc_factor=rescale_conc_factor,
     )
     # jit=True: jaxopt uses jax.lax.while_loop internally, which is required
     # for compatibility with jax.lax.cond / jax.lax.scan (traced context).
@@ -609,22 +670,34 @@ def find_root(
     J_sol_sol_func=default_J_sol_sol,
     J_sol_an_func=default_J_sol_an,
     J_an_an_func=default_J_an_an,
+    monotonicity_dict=DEFAULT_MONOTONICITY,
+    rescale_h_sol=default_h_sol_rescale,
+    rescale_h_an=default_h_an_rescale,
+    rescale_J_sol_sol=default_J_sol_sol_rescale,
+    rescale_J_sol_an=default_J_sol_an_rescale,
+    rescale_J_an_an=default_J_an_an_rescale,
+    rescale_conc_factor=default_conc_factor_rescale,
     initial_guess=None, max_tries=10,
 ):
     """Multi-start root solver for the generic N-solvent + M-anion Ising model.
 
     Args:
-        input_params:  parameter dict (must include params_anion_anion, 6 elements)
-        solvents:      dict of {name: {"dn": ..., "an": ..., "x": ..., "volume": ...}}
-        anions:        dict of {name: {"dn": ..., "x": ..., "volume": ...}}
-        z:             coordination number
-        h_sol_func:    h term for solvents — default: expfunc + logfunc
-        h_an_func:     h term for anions  — default: expfunc + logfunc
-        J_sol_sol_func: J term for solvent pairs — default: DN/AN cross + DN-DN + AN-AN
-        J_sol_an_func:  J term for solvent-anion — default: sol_sol_func of (dn_an, an_sol)
-        J_an_an_func:   J term for anion pairs   — default: sol_sol_func of (dn_i, dn_j)
-        initial_guess: shape (N+M,), defaults to uniform 1/(N+M)
-        max_tries:     number of initial guesses to try (default 10)
+        input_params:      parameter dict (must include params_anion_anion, 6 elements)
+        solvents:          dict of {name: {"dn": ..., "an": ..., "x": ..., "volume": ...}}
+        anions:            dict of {name: {"dn": ..., "x": ..., "volume": ...}}
+        z:                 coordination number
+        h_sol_func:        h term for solvents — default: expfunc + logfunc
+        h_an_func:         h term for anions  — default: expfunc + logfunc
+        J_sol_sol_func:    J term for solvent pairs — default: DN/AN cross + DN-DN + AN-AN
+        J_sol_an_func:     J term for solvent-anion — default: sol_sol_func of (dn_an, an_sol)
+        J_an_an_func:      J term for anion pairs   — default: sol_sol_func of (dn_i, dn_j)
+        monotonicity_dict: dict controlling monotonicity constraints — see DEFAULT_MONOTONICITY.
+                           Converted to a frozenset internally for JAX static-arg hashing.
+        rescale_h_sol, rescale_h_an, rescale_J_sol_sol, rescale_J_sol_an,
+        rescale_J_an_an, rescale_conc_factor:
+                           companion rescaling functions (defaults match default term functions).
+        initial_guess:     shape (N+M,), defaults to uniform 1/(N+M)
+        max_tries:         number of initial guesses to try (default 10)
 
     Returns:
         (occupations, found_valid): shape (N+M,) array and boolean flag
@@ -638,7 +711,10 @@ def find_root(
         initial_guess, max_tries,
         h_sol_func=h_sol_func, h_an_func=h_an_func,
         J_sol_sol_func=J_sol_sol_func, J_sol_an_func=J_sol_an_func,
-        J_an_an_func=J_an_an_func,
+        J_an_an_func=J_an_an_func, monotonicity_dict=_freeze_mono(monotonicity_dict),
+        rescale_h_sol=rescale_h_sol, rescale_h_an=rescale_h_an,
+        rescale_J_sol_sol=rescale_J_sol_sol, rescale_J_sol_an=rescale_J_sol_an,
+        rescale_J_an_an=rescale_J_an_an, rescale_conc_factor=rescale_conc_factor,
     )
 
 
@@ -649,6 +725,13 @@ def get_root_error(
     J_sol_sol_func=default_J_sol_sol,
     J_sol_an_func=default_J_sol_an,
     J_an_an_func=default_J_an_an,
+    monotonicity_dict=DEFAULT_MONOTONICITY,
+    rescale_h_sol=default_h_sol_rescale,
+    rescale_h_an=default_h_an_rescale,
+    rescale_J_sol_sol=default_J_sol_sol_rescale,
+    rescale_J_sol_an=default_J_sol_an_rescale,
+    rescale_J_an_an=default_J_an_an_rescale,
+    rescale_conc_factor=default_conc_factor_rescale,
 ):
     """Diagnostic: returns mean-field equation residuals for given occupation fractions."""
     dn_sol, an_sol, x_sol, v_sol, dn_an, x_an, v_an = _species_props_to_arrays(solvents, anions)
@@ -656,7 +739,10 @@ def get_root_error(
         vars, input_params, dn_sol, an_sol, x_sol, v_sol, dn_an, x_an, v_an, z,
         h_sol_func=h_sol_func, h_an_func=h_an_func,
         J_sol_sol_func=J_sol_sol_func, J_sol_an_func=J_sol_an_func,
-        J_an_an_func=J_an_an_func,
+        J_an_an_func=J_an_an_func, monotonicity_dict=_freeze_mono(monotonicity_dict),
+        rescale_h_sol=rescale_h_sol, rescale_h_an=rescale_h_an,
+        rescale_J_sol_sol=rescale_J_sol_sol, rescale_J_sol_an=rescale_J_sol_an,
+        rescale_J_an_an=rescale_J_an_an, rescale_conc_factor=rescale_conc_factor,
     )
 
 
@@ -667,16 +753,27 @@ def li_free_energy(
     J_sol_sol_func=default_J_sol_sol,
     J_sol_an_func=default_J_sol_an,
     J_an_an_func=default_J_an_an,
+    monotonicity_dict=DEFAULT_MONOTONICITY,
+    rescale_h_sol=default_h_sol_rescale,
+    rescale_h_an=default_h_an_rescale,
+    rescale_J_sol_sol=default_J_sol_sol_rescale,
+    rescale_J_sol_an=default_J_sol_an_rescale,
+    rescale_J_an_an=default_J_an_an_rescale,
+    rescale_conc_factor=default_conc_factor_rescale,
 ):
     """Li+ solvation free energy for a generic N-solvent + M-anion system.
 
     Args:
-        input_params: parameter dict (must include params_anion_anion, 6 elements)
-        solvents:     dict of {name: {"dn": ..., "an": ..., "x": ..., "volume": ...}}
-        anions:       dict of {name: {"dn": ..., "x": ..., "volume": ...}}
-        z:            coordination number
+        input_params:      parameter dict (must include params_anion_anion, 6 elements)
+        solvents:          dict of {name: {"dn": ..., "an": ..., "x": ..., "volume": ...}}
+        anions:            dict of {name: {"dn": ..., "x": ..., "volume": ...}}
+        z:                 coordination number
         h_sol_func, h_an_func, J_sol_sol_func, J_sol_an_func, J_an_an_func:
-                      injectable term functions (defaults = current physics)
+                           injectable term functions (defaults = current physics)
+        monotonicity_dict: dict controlling monotonicity constraints — see DEFAULT_MONOTONICITY.
+        rescale_h_sol, rescale_h_an, rescale_J_sol_sol, rescale_J_sol_an,
+        rescale_J_an_an, rescale_conc_factor:
+                           companion rescaling functions (defaults match default term functions).
 
     Returns:
         G: scalar free energy
@@ -684,17 +781,24 @@ def li_free_energy(
     dn_sol, an_sol, x_sol, v_sol, dn_an, x_an, v_an = _species_props_to_arrays(solvents, anions)
     n_species = len(solvents) + len(anions)
     initial_guess = jnp.ones(n_species) / n_species
+    mono_frozen = _freeze_mono(monotonicity_dict)
     vars, _ = _find_root_impl(
         input_params, dn_sol, an_sol, x_sol, v_sol, dn_an, x_an, v_an, z,
         initial_guess, max_tries=10,
         h_sol_func=h_sol_func, h_an_func=h_an_func,
         J_sol_sol_func=J_sol_sol_func, J_sol_an_func=J_sol_an_func,
-        J_an_an_func=J_an_an_func,
+        J_an_an_func=J_an_an_func, monotonicity_dict=mono_frozen,
+        rescale_h_sol=rescale_h_sol, rescale_h_an=rescale_h_an,
+        rescale_J_sol_sol=rescale_J_sol_sol, rescale_J_sol_an=rescale_J_sol_an,
+        rescale_J_an_an=rescale_J_an_an, rescale_conc_factor=rescale_conc_factor,
     )
     h, J, kT = energetics(
         vars, input_params, dn_sol, an_sol, x_sol, v_sol, dn_an, x_an, v_an, z,
         h_sol_func=h_sol_func, h_an_func=h_an_func,
         J_sol_sol_func=J_sol_sol_func, J_sol_an_func=J_sol_an_func,
-        J_an_an_func=J_an_an_func,
+        J_an_an_func=J_an_an_func, monotonicity_dict=mono_frozen,
+        rescale_h_sol=rescale_h_sol, rescale_h_an=rescale_h_an,
+        rescale_J_sol_sol=rescale_J_sol_sol, rescale_J_sol_an=rescale_J_sol_an,
+        rescale_J_an_an=rescale_J_an_an, rescale_conc_factor=rescale_conc_factor,
     )
     return jnp.sum(h * z * vars)
