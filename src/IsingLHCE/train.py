@@ -11,6 +11,11 @@ from jax import random
 from functools import partial
 
 from .model import _find_root_impl, DEFAULT_MONOTONICITY, _freeze_mono
+from .interactions import (
+    default_h_sol_rescale, default_h_an_rescale,
+    default_J_sol_sol_rescale, default_J_sol_an_rescale, default_J_an_an_rescale,
+    default_conc_factor_rescale,
+)
 
 jax.config.update("jax_enable_x64", True)
 jax.config.update("jax_disable_jit", False)
@@ -27,6 +32,12 @@ def objective_single(
     targets,
     init_guess,
     monotonicity_dict=None,
+    rescale_h_sol=default_h_sol_rescale,
+    rescale_h_an=default_h_an_rescale,
+    rescale_J_sol_sol=default_J_sol_sol_rescale,
+    rescale_J_sol_an=default_J_sol_an_rescale,
+    rescale_J_an_an=default_J_an_an_rescale,
+    rescale_conc_factor=default_conc_factor_rescale,
 ):
     """Compute the squared loss for a single data point.
 
@@ -38,6 +49,9 @@ def objective_single(
         targets:                target occupation fractions, shape (N+M,)
         init_guess:             initial guess for the root solver, shape (N+M,)
         monotonicity_dict:      frozenset from _freeze_mono(), or None for default.
+        rescale_h_sol, rescale_h_an, rescale_J_sol_sol, rescale_J_sol_an,
+        rescale_J_an_an, rescale_conc_factor:
+                                companion rescaling functions.
 
     Returns:
         (loss, new_init): squared loss (scalar), updated initial guess shape (N+M,)
@@ -45,14 +59,30 @@ def objective_single(
     occupations, found_valid = _find_root_impl(
         input_params, dn_sol, an_sol, x_sol, v_sol, dn_an, x_an, v_an, z,
         init_guess, max_tries=10, monotonicity_dict=monotonicity_dict,
+        rescale_h_sol=rescale_h_sol, rescale_h_an=rescale_h_an,
+        rescale_J_sol_sol=rescale_J_sol_sol, rescale_J_sol_an=rescale_J_sol_an,
+        rescale_J_an_an=rescale_J_an_an, rescale_conc_factor=rescale_conc_factor,
     )
     loss = jnp.sum((occupations - targets) ** 2)
     new_init = jnp.where(found_valid, occupations, init_guess)
     return loss, new_init
 
 
-@partial(jax.jit, static_argnames=("monotonicity_dict",))
-def total_objective(params, data, monotonicity_dict=None):
+@partial(jax.jit, static_argnames=(
+    "monotonicity_dict",
+    "rescale_h_sol", "rescale_h_an",
+    "rescale_J_sol_sol", "rescale_J_sol_an", "rescale_J_an_an",
+    "rescale_conc_factor",
+))
+def total_objective(
+    params, data, monotonicity_dict=None,
+    rescale_h_sol=default_h_sol_rescale,
+    rescale_h_an=default_h_an_rescale,
+    rescale_J_sol_sol=default_J_sol_sol_rescale,
+    rescale_J_sol_an=default_J_sol_an_rescale,
+    rescale_J_an_an=default_J_an_an_rescale,
+    rescale_conc_factor=default_conc_factor_rescale,
+):
     """Compute RMSE loss over all data points.
 
     data must contain:
@@ -64,7 +94,13 @@ def total_objective(params, data, monotonicity_dict=None):
     monotonicity_dict: frozenset from _freeze_mono(), or None for default.
     """
     v_objective = jax.vmap(
-        partial(objective_single, monotonicity_dict=monotonicity_dict),
+        partial(
+            objective_single,
+            monotonicity_dict=monotonicity_dict,
+            rescale_h_sol=rescale_h_sol, rescale_h_an=rescale_h_an,
+            rescale_J_sol_sol=rescale_J_sol_sol, rescale_J_sol_an=rescale_J_sol_an,
+            rescale_J_an_an=rescale_J_an_an, rescale_conc_factor=rescale_conc_factor,
+        ),
         in_axes=(None, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
     )
     losses, new_inits = v_objective(
@@ -220,10 +256,29 @@ def initialize_params(
         return init_params
 
 
-@partial(jax.jit, static_argnames=("monotonicity_dict",))
-def update(params, opt_state, data, monotonicity_dict=None):
+@partial(jax.jit, static_argnames=(
+    "monotonicity_dict",
+    "rescale_h_sol", "rescale_h_an",
+    "rescale_J_sol_sol", "rescale_J_sol_an", "rescale_J_an_an",
+    "rescale_conc_factor",
+))
+def update(
+    params, opt_state, data, monotonicity_dict=None,
+    rescale_h_sol=default_h_sol_rescale,
+    rescale_h_an=default_h_an_rescale,
+    rescale_J_sol_sol=default_J_sol_sol_rescale,
+    rescale_J_sol_an=default_J_sol_an_rescale,
+    rescale_J_an_an=default_J_an_an_rescale,
+    rescale_conc_factor=default_conc_factor_rescale,
+):
     (loss, new_inits), grads = jax.value_and_grad(
-        partial(total_objective, monotonicity_dict=monotonicity_dict), has_aux=True
+        partial(
+            total_objective,
+            monotonicity_dict=monotonicity_dict,
+            rescale_h_sol=rescale_h_sol, rescale_h_an=rescale_h_an,
+            rescale_J_sol_sol=rescale_J_sol_sol, rescale_J_sol_an=rescale_J_sol_an,
+            rescale_J_an_an=rescale_J_an_an, rescale_conc_factor=rescale_conc_factor,
+        ), has_aux=True
     )(params, data)
     updates, opt_state = optimizer.update(grads, opt_state, params)
     params = optax.apply_updates(params, updates)
@@ -231,7 +286,14 @@ def update(params, opt_state, data, monotonicity_dict=None):
 
 
 def train(params, num_epochs, train_data, test_data, val_data, opt_state,
-          monotonicity_dict=DEFAULT_MONOTONICITY, random_seed=42):
+          monotonicity_dict=DEFAULT_MONOTONICITY,
+          rescale_h_sol=default_h_sol_rescale,
+          rescale_h_an=default_h_an_rescale,
+          rescale_J_sol_sol=default_J_sol_sol_rescale,
+          rescale_J_sol_an=default_J_sol_an_rescale,
+          rescale_J_an_an=default_J_an_an_rescale,
+          rescale_conc_factor=default_conc_factor_rescale,
+          random_seed=42):
     # Initialize backup variables
     prev_params = copy.deepcopy(params)  # backup from the previous step
     best_params = copy.deepcopy(params)  # backup for best parameters
@@ -273,15 +335,33 @@ def train(params, num_epochs, train_data, test_data, val_data, opt_state,
             batch = {k: jnp.take(v, batch_idx, axis=0) for k, v in train_data.items()}
             batch['init_guess'] = jnp.take(init_guess_train, batch_idx, axis=0)
             # Compute gradients & update parameters on this batch
-            params, opt_state, loss, new_inits = update(params, opt_state, batch, monotonicity_dict=_freeze_mono(monotonicity_dict))
+            params, opt_state, loss, new_inits = update(
+                params, opt_state, batch,
+                monotonicity_dict=_freeze_mono(monotonicity_dict),
+                rescale_h_sol=rescale_h_sol, rescale_h_an=rescale_h_an,
+                rescale_J_sol_sol=rescale_J_sol_sol, rescale_J_sol_an=rescale_J_sol_an,
+                rescale_J_an_an=rescale_J_an_an, rescale_conc_factor=rescale_conc_factor,
+            )
             init_guess_train = init_guess_train.at[batch_idx].set(new_inits)
             epoch_loss += loss
 
         epoch_loss /= steps_per_ep
         val_data['init_guess'] = init_guess_val
         test_data['init_guess'] = init_guess_test
-        val_loss, _ = total_objective(params, val_data, monotonicity_dict=_freeze_mono(monotonicity_dict))
-        test_loss, _ = total_objective(params, test_data, monotonicity_dict=_freeze_mono(monotonicity_dict))
+        val_loss, _ = total_objective(
+            params, val_data,
+            monotonicity_dict=_freeze_mono(monotonicity_dict),
+            rescale_h_sol=rescale_h_sol, rescale_h_an=rescale_h_an,
+            rescale_J_sol_sol=rescale_J_sol_sol, rescale_J_sol_an=rescale_J_sol_an,
+            rescale_J_an_an=rescale_J_an_an, rescale_conc_factor=rescale_conc_factor,
+        )
+        test_loss, _ = total_objective(
+            params, test_data,
+            monotonicity_dict=_freeze_mono(monotonicity_dict),
+            rescale_h_sol=rescale_h_sol, rescale_h_an=rescale_h_an,
+            rescale_J_sol_sol=rescale_J_sol_sol, rescale_J_sol_an=rescale_J_sol_an,
+            rescale_J_an_an=rescale_J_an_an, rescale_conc_factor=rescale_conc_factor,
+        )
         if epoch % 1 == 0:
             print(
                 f"Epoch {epoch}: loss = {epoch_loss:.4f}, val loss = {val_loss:.4f}, test loss = {test_loss:.4f}"
@@ -321,7 +401,15 @@ def train(params, num_epochs, train_data, test_data, val_data, opt_state,
     return params, train_loss_log, val_loss_log
 
 
-def parity_results(data_dict, input_params, monotonicity_dict=DEFAULT_MONOTONICITY):
+def parity_results(
+    data_dict, input_params, monotonicity_dict=DEFAULT_MONOTONICITY,
+    rescale_h_sol=default_h_sol_rescale,
+    rescale_h_an=default_h_an_rescale,
+    rescale_J_sol_sol=default_J_sol_sol_rescale,
+    rescale_J_sol_an=default_J_sol_an_rescale,
+    rescale_J_an_an=default_J_an_an_rescale,
+    rescale_conc_factor=default_conc_factor_rescale,
+):
     """Evaluate trained parameters against each dataset split and produce parity plots.
 
     data_dict maps split names (e.g. "train", "val", "test") to data dicts with keys:
@@ -352,6 +440,9 @@ def parity_results(data_dict, input_params, monotonicity_dict=DEFAULT_MONOTONICI
                 data["z"][i],
                 init_guess, max_tries=10,
                 monotonicity_dict=_freeze_mono(monotonicity_dict),
+                rescale_h_sol=rescale_h_sol, rescale_h_an=rescale_h_an,
+                rescale_J_sol_sol=rescale_J_sol_sol, rescale_J_sol_an=rescale_J_sol_an,
+                rescale_J_an_an=rescale_J_an_an, rescale_conc_factor=rescale_conc_factor,
             )
             preds[i] = np.array(occupations)
 
@@ -378,7 +469,13 @@ def parity_results(data_dict, input_params, monotonicity_dict=DEFAULT_MONOTONICI
         ss_tot = np.sum((targets - np.mean(targets, axis=0)) ** 2)
         r2 = 1 - ss_res / ss_tot
 
-        loss, _ = total_objective(input_params, data_dict[split_name])
+        loss, _ = total_objective(
+            input_params, data_dict[split_name],
+            monotonicity_dict=_freeze_mono(monotonicity_dict),
+            rescale_h_sol=rescale_h_sol, rescale_h_an=rescale_h_an,
+            rescale_J_sol_sol=rescale_J_sol_sol, rescale_J_sol_an=rescale_J_sol_an,
+            rescale_J_an_an=rescale_J_an_an, rescale_conc_factor=rescale_conc_factor,
+        )
         print(f"Loss on the {split_name} data: {loss:.4f}")
         print(f"RMSE on the {split_name} data: {rmse:.4f}")
         print(f"R² on the {split_name} data:   {r2:.4f}")
