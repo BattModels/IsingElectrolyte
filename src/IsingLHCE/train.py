@@ -12,6 +12,8 @@ from functools import partial
 
 from .model import _find_root_impl, DEFAULT_MONOTONICITY, _freeze_mono
 from .interactions import (
+    default_h_sol, default_h_an,
+    default_J_sol_sol, default_J_sol_an, default_J_an_an,
     default_h_sol_rescale, default_h_an_rescale,
     default_J_sol_sol_rescale, default_J_sol_an_rescale, default_J_an_an_rescale,
     default_conc_factor_rescale,
@@ -32,6 +34,11 @@ def objective_single(
     targets,
     init_guess,
     monotonicity_dict=None,
+    h_sol_func=default_h_sol,
+    h_an_func=default_h_an,
+    J_sol_sol_func=default_J_sol_sol,
+    J_sol_an_func=default_J_sol_an,
+    J_an_an_func=default_J_an_an,
     rescale_h_sol=default_h_sol_rescale,
     rescale_h_an=default_h_an_rescale,
     rescale_J_sol_sol=default_J_sol_sol_rescale,
@@ -49,6 +56,8 @@ def objective_single(
         targets:                target occupation fractions, shape (N+M,)
         init_guess:             initial guess for the root solver, shape (N+M,)
         monotonicity_dict:      frozenset from _freeze_mono(), or None for default.
+        h_sol_func, h_an_func, J_sol_sol_func, J_sol_an_func, J_an_an_func:
+                                injectable term functions (defaults = current physics).
         rescale_h_sol, rescale_h_an, rescale_J_sol_sol, rescale_J_sol_an,
         rescale_J_an_an, rescale_conc_factor:
                                 companion rescaling functions.
@@ -59,6 +68,9 @@ def objective_single(
     occupations, found_valid = _find_root_impl(
         input_params, dn_sol, an_sol, x_sol, v_sol, dn_an, x_an, v_an, z,
         init_guess, max_tries=10, monotonicity_dict=monotonicity_dict,
+        h_sol_func=h_sol_func, h_an_func=h_an_func,
+        J_sol_sol_func=J_sol_sol_func, J_sol_an_func=J_sol_an_func,
+        J_an_an_func=J_an_an_func,
         rescale_h_sol=rescale_h_sol, rescale_h_an=rescale_h_an,
         rescale_J_sol_sol=rescale_J_sol_sol, rescale_J_sol_an=rescale_J_sol_an,
         rescale_J_an_an=rescale_J_an_an, rescale_conc_factor=rescale_conc_factor,
@@ -70,12 +82,19 @@ def objective_single(
 
 @partial(jax.jit, static_argnames=(
     "monotonicity_dict",
+    "h_sol_func", "h_an_func",
+    "J_sol_sol_func", "J_sol_an_func", "J_an_an_func",
     "rescale_h_sol", "rescale_h_an",
     "rescale_J_sol_sol", "rescale_J_sol_an", "rescale_J_an_an",
     "rescale_conc_factor",
 ))
 def total_objective(
     params, data, monotonicity_dict=None,
+    h_sol_func=default_h_sol,
+    h_an_func=default_h_an,
+    J_sol_sol_func=default_J_sol_sol,
+    J_sol_an_func=default_J_sol_an,
+    J_an_an_func=default_J_an_an,
     rescale_h_sol=default_h_sol_rescale,
     rescale_h_an=default_h_an_rescale,
     rescale_J_sol_sol=default_J_sol_sol_rescale,
@@ -92,11 +111,16 @@ def total_objective(
         targets:                      shape (n, N+M) target occupation fractions
         init_guess:                   shape (n, N+M)
     monotonicity_dict: frozenset from _freeze_mono(), or None for default.
+    h_sol_func, h_an_func, J_sol_sol_func, J_sol_an_func, J_an_an_func:
+                       injectable term functions (defaults = current physics).
     """
     v_objective = jax.vmap(
         partial(
             objective_single,
             monotonicity_dict=monotonicity_dict,
+            h_sol_func=h_sol_func, h_an_func=h_an_func,
+            J_sol_sol_func=J_sol_sol_func, J_sol_an_func=J_sol_an_func,
+            J_an_an_func=J_an_an_func,
             rescale_h_sol=rescale_h_sol, rescale_h_an=rescale_h_an,
             rescale_J_sol_sol=rescale_J_sol_sol, rescale_J_sol_an=rescale_J_sol_an,
             rescale_J_an_an=rescale_J_an_an, rescale_conc_factor=rescale_conc_factor,
@@ -258,12 +282,19 @@ def initialize_params(
 
 @partial(jax.jit, static_argnames=(
     "monotonicity_dict",
+    "h_sol_func", "h_an_func",
+    "J_sol_sol_func", "J_sol_an_func", "J_an_an_func",
     "rescale_h_sol", "rescale_h_an",
     "rescale_J_sol_sol", "rescale_J_sol_an", "rescale_J_an_an",
     "rescale_conc_factor",
 ))
 def update(
     params, opt_state, data, monotonicity_dict=None,
+    h_sol_func=default_h_sol,
+    h_an_func=default_h_an,
+    J_sol_sol_func=default_J_sol_sol,
+    J_sol_an_func=default_J_sol_an,
+    J_an_an_func=default_J_an_an,
     rescale_h_sol=default_h_sol_rescale,
     rescale_h_an=default_h_an_rescale,
     rescale_J_sol_sol=default_J_sol_sol_rescale,
@@ -275,6 +306,9 @@ def update(
         partial(
             total_objective,
             monotonicity_dict=monotonicity_dict,
+            h_sol_func=h_sol_func, h_an_func=h_an_func,
+            J_sol_sol_func=J_sol_sol_func, J_sol_an_func=J_sol_an_func,
+            J_an_an_func=J_an_an_func,
             rescale_h_sol=rescale_h_sol, rescale_h_an=rescale_h_an,
             rescale_J_sol_sol=rescale_J_sol_sol, rescale_J_sol_an=rescale_J_sol_an,
             rescale_J_an_an=rescale_J_an_an, rescale_conc_factor=rescale_conc_factor,
@@ -287,6 +321,11 @@ def update(
 
 def train(params, num_epochs, train_data, test_data, val_data, opt_state,
           monotonicity_dict=DEFAULT_MONOTONICITY,
+          h_sol_func=default_h_sol,
+          h_an_func=default_h_an,
+          J_sol_sol_func=default_J_sol_sol,
+          J_sol_an_func=default_J_sol_an,
+          J_an_an_func=default_J_an_an,
           rescale_h_sol=default_h_sol_rescale,
           rescale_h_an=default_h_an_rescale,
           rescale_J_sol_sol=default_J_sol_sol_rescale,
@@ -338,6 +377,9 @@ def train(params, num_epochs, train_data, test_data, val_data, opt_state,
             params, opt_state, loss, new_inits = update(
                 params, opt_state, batch,
                 monotonicity_dict=_freeze_mono(monotonicity_dict),
+                h_sol_func=h_sol_func, h_an_func=h_an_func,
+                J_sol_sol_func=J_sol_sol_func, J_sol_an_func=J_sol_an_func,
+                J_an_an_func=J_an_an_func,
                 rescale_h_sol=rescale_h_sol, rescale_h_an=rescale_h_an,
                 rescale_J_sol_sol=rescale_J_sol_sol, rescale_J_sol_an=rescale_J_sol_an,
                 rescale_J_an_an=rescale_J_an_an, rescale_conc_factor=rescale_conc_factor,
@@ -351,6 +393,9 @@ def train(params, num_epochs, train_data, test_data, val_data, opt_state,
         val_loss, _ = total_objective(
             params, val_data,
             monotonicity_dict=_freeze_mono(monotonicity_dict),
+            h_sol_func=h_sol_func, h_an_func=h_an_func,
+            J_sol_sol_func=J_sol_sol_func, J_sol_an_func=J_sol_an_func,
+            J_an_an_func=J_an_an_func,
             rescale_h_sol=rescale_h_sol, rescale_h_an=rescale_h_an,
             rescale_J_sol_sol=rescale_J_sol_sol, rescale_J_sol_an=rescale_J_sol_an,
             rescale_J_an_an=rescale_J_an_an, rescale_conc_factor=rescale_conc_factor,
@@ -358,6 +403,9 @@ def train(params, num_epochs, train_data, test_data, val_data, opt_state,
         test_loss, _ = total_objective(
             params, test_data,
             monotonicity_dict=_freeze_mono(monotonicity_dict),
+            h_sol_func=h_sol_func, h_an_func=h_an_func,
+            J_sol_sol_func=J_sol_sol_func, J_sol_an_func=J_sol_an_func,
+            J_an_an_func=J_an_an_func,
             rescale_h_sol=rescale_h_sol, rescale_h_an=rescale_h_an,
             rescale_J_sol_sol=rescale_J_sol_sol, rescale_J_sol_an=rescale_J_sol_an,
             rescale_J_an_an=rescale_J_an_an, rescale_conc_factor=rescale_conc_factor,
@@ -403,6 +451,11 @@ def train(params, num_epochs, train_data, test_data, val_data, opt_state,
 
 def parity_results(
     data_dict, input_params, monotonicity_dict=DEFAULT_MONOTONICITY,
+    h_sol_func=default_h_sol,
+    h_an_func=default_h_an,
+    J_sol_sol_func=default_J_sol_sol,
+    J_sol_an_func=default_J_sol_an,
+    J_an_an_func=default_J_an_an,
     rescale_h_sol=default_h_sol_rescale,
     rescale_h_an=default_h_an_rescale,
     rescale_J_sol_sol=default_J_sol_sol_rescale,
@@ -440,6 +493,9 @@ def parity_results(
                 data["z"][i],
                 init_guess, max_tries=10,
                 monotonicity_dict=_freeze_mono(monotonicity_dict),
+                h_sol_func=h_sol_func, h_an_func=h_an_func,
+                J_sol_sol_func=J_sol_sol_func, J_sol_an_func=J_sol_an_func,
+                J_an_an_func=J_an_an_func,
                 rescale_h_sol=rescale_h_sol, rescale_h_an=rescale_h_an,
                 rescale_J_sol_sol=rescale_J_sol_sol, rescale_J_sol_an=rescale_J_sol_an,
                 rescale_J_an_an=rescale_J_an_an, rescale_conc_factor=rescale_conc_factor,
@@ -472,6 +528,9 @@ def parity_results(
         loss, _ = total_objective(
             input_params, data_dict[split_name],
             monotonicity_dict=_freeze_mono(monotonicity_dict),
+            h_sol_func=h_sol_func, h_an_func=h_an_func,
+            J_sol_sol_func=J_sol_sol_func, J_sol_an_func=J_sol_an_func,
+            J_an_an_func=J_an_an_func,
             rescale_h_sol=rescale_h_sol, rescale_h_an=rescale_h_an,
             rescale_J_sol_sol=rescale_J_sol_sol, rescale_J_sol_an=rescale_J_sol_an,
             rescale_J_an_an=rescale_J_an_an, rescale_conc_factor=rescale_conc_factor,

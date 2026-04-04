@@ -24,6 +24,13 @@ Config fields (YAML keys = long CLI flag names)
     lr_decay_steps  Exponential decay steps        (default: 100)
     lr_decay_rate   Exponential decay rate         (default: 0.99)
 
+    # Optional — term function overrides (string names from IsingLHCE.interactions)
+    h_sol_func      Name of h(Li-sol) function     (default: package default)
+    h_an_func       Name of h(Li-anion) function   (default: package default)
+    j_sol_sol_func  Name of J(sol-sol) function    (default: package default)
+    j_sol_an_func   Name of J(sol-anion) function  (default: package default)
+    j_an_an_func    Name of J(anion-anion) function(default: package default)
+
 Expected CSV columns
 --------------------
     Solvent DN, Diluent DN, Anion DN
@@ -46,8 +53,85 @@ import optax
 import pandas as pd
 import yaml
 
+import IsingLHCE.interactions as _interactions
 import IsingLHCE.train as ising_train
+from IsingLHCE.interactions import (
+    default_h_sol, default_h_an,
+    default_J_sol_sol, default_J_sol_an, default_J_an_an,
+)
 from IsingLHCE.train import initialize_params, train, parity_results
+
+
+# ---------------------------------------------------------------------------
+# Term-function resolver
+# ---------------------------------------------------------------------------
+
+def _resolve_func(spec, default):
+    """Resolve a term function from a callable, string name, or None.
+
+    Args:
+        spec:    None    → return ``default`` (package default)
+                 callable → return as-is (function defined anywhere)
+                 str      → look up by name from ``IsingLHCE.interactions``
+                            (add your new function there; no import needed here)
+        default: fallback callable when spec is None
+
+    Returns:
+        A JAX-traceable callable matching the relevant signature contract.
+
+    Raises:
+        ValueError: if ``spec`` is a string not found in IsingLHCE.interactions
+        TypeError:  if ``spec`` is not None, callable, or str
+    """
+    if spec is None:
+        return default
+    if callable(spec):
+        return spec
+    if isinstance(spec, str):
+        fn = getattr(_interactions, spec, None)
+        if fn is None:
+            raise ValueError(
+                f"No function named {spec!r} found in IsingLHCE.interactions. "
+                "Define it there and reinstall the package (pip install -e .)."
+            )
+        return fn
+    raise TypeError(f"Expected None, callable, or str; got {type(spec).__name__!r}")
+
+
+# ---------------------------------------------------------------------------
+# CUSTOMIZATION — swap in your own term functions here
+# ---------------------------------------------------------------------------
+# Each function must be JAX-traceable (use jax.numpy, not numpy).
+#
+# Signature contracts:
+#   h_sol_func     (dn_eff: scalar, x: scalar, params: array) -> scalar
+#   h_an_func      (dn_an:  scalar, x: scalar, params: array) -> scalar
+#   J_sol_sol_func (dn_i, an_i, x_i, dn_j, an_j, x_j, params) -> scalar
+#   J_sol_an_func  (dn_an, an_sol, x_sol, x_an, params) -> scalar
+#   J_an_an_func   (dn_i, x_i, dn_j, x_j, params) -> scalar
+#
+# Three ways to specify each slot:
+#   None       — use the package default (no change needed)
+#   callable   — a function defined below or imported above
+#   str        — name of a function in IsingLHCE.interactions
+#                (add it there, no import needed here; same name works in config.yaml)
+#
+# Examples:
+#   H_AN_FUNC = "my_new_h_an"            # define my_new_h_an in interactions.py
+#
+#   from IsingLHCE.interactions import langmuirfunc
+#   def my_h_sol(dn_eff, x, params): return langmuirfunc(dn_eff, params)
+#   H_SOL_FUNC = my_h_sol
+#
+# NOTE: functions with different parameter array lengths than the defaults
+# require matching changes to initialize_params() or a compatible checkpoint.
+# Default parameter counts: h_sol/h_an=5, J_sol_sol=16, J_sol_an/J_an_an=6.
+
+H_SOL_FUNC     = None   # default: expfunc(dn_eff) + logfunc(x),  5 params
+H_AN_FUNC      = None   # default: expfunc(dn_an)  + logfunc(x),  5 params
+J_SOL_SOL_FUNC = None   # default: DN/AN cross + DN-DN + AN-AN,  16 params
+J_SOL_AN_FUNC  = None   # default: sol_sol_func(dn_an, an_sol),   6 params
+J_AN_AN_FUNC   = None   # default: sol_sol_func(dn_i, dn_j),      6 params
 
 
 # ---------------------------------------------------------------------------
@@ -71,6 +155,12 @@ DEFAULTS = {
     "learning_rate":   1e-2,
     "lr_decay_steps":  100,
     "lr_decay_rate":   0.99,
+    # Optional term-function overrides (string names from IsingLHCE.interactions)
+    "h_sol_func":      None,
+    "h_an_func":       None,
+    "j_sol_sol_func":  None,
+    "j_sol_an_func":   None,
+    "j_an_an_func":    None,
 }
 
 
@@ -95,6 +185,17 @@ def _load_config(argv):
     parser.add_argument("--learning_rate",  type=float, default=None)
     parser.add_argument("--lr_decay_steps", type=int,   default=None)
     parser.add_argument("--lr_decay_rate",  type=float, default=None)
+    # Term-function overrides: string names looked up in IsingLHCE.interactions
+    parser.add_argument("--h_sol_func",     default=None,
+                        help="Name of h(Li-sol) function in IsingLHCE.interactions")
+    parser.add_argument("--h_an_func",      default=None,
+                        help="Name of h(Li-anion) function in IsingLHCE.interactions")
+    parser.add_argument("--j_sol_sol_func", default=None,
+                        help="Name of J(sol-sol) function in IsingLHCE.interactions")
+    parser.add_argument("--j_sol_an_func",  default=None,
+                        help="Name of J(sol-anion) function in IsingLHCE.interactions")
+    parser.add_argument("--j_an_an_func",   default=None,
+                        help="Name of J(anion-anion) function in IsingLHCE.interactions")
 
     args = parser.parse_args(argv)
 
@@ -177,6 +278,16 @@ def load_split(path):
 def main(argv=None):
     cfg = _load_config(sys.argv[1:] if argv is None else argv)
 
+    # ------------------------------------------------------------------
+    # Resolve term functions
+    # Script-level CUSTOMIZATION values take precedence over YAML/CLI strings.
+    # ------------------------------------------------------------------
+    h_sol_func     = _resolve_func(H_SOL_FUNC     or cfg.get("h_sol_func"),     default_h_sol)
+    h_an_func      = _resolve_func(H_AN_FUNC      or cfg.get("h_an_func"),      default_h_an)
+    j_sol_sol_func = _resolve_func(J_SOL_SOL_FUNC or cfg.get("j_sol_sol_func"), default_J_sol_sol)
+    j_sol_an_func  = _resolve_func(J_SOL_AN_FUNC  or cfg.get("j_sol_an_func"),  default_J_sol_an)
+    j_an_an_func   = _resolve_func(J_AN_AN_FUNC   or cfg.get("j_an_an_func"),   default_J_an_an)
+
     print("=== Ising LHCE Training ===")
     print(f"  train:    {cfg['train']}")
     print(f"  val:      {cfg['val']}")
@@ -184,6 +295,11 @@ def main(argv=None):
     print(f"  epochs:   {cfg['epochs']}  trials: {cfg['trials']}  seed: {cfg['seed']}")
     print(f"  lr:       {cfg['learning_rate']}  decay_steps: {cfg['lr_decay_steps']}  decay_rate: {cfg['lr_decay_rate']}")
     print(f"  checkpoint: {cfg['checkpoint']}")
+    print(f"  h_sol_func:     {h_sol_func.__name__}")
+    print(f"  h_an_func:      {h_an_func.__name__}")
+    print(f"  j_sol_sol_func: {j_sol_sol_func.__name__}")
+    print(f"  j_sol_an_func:  {j_sol_an_func.__name__}")
+    print(f"  j_an_an_func:   {j_an_an_func.__name__}")
     print()
 
     # ------------------------------------------------------------------
@@ -227,6 +343,9 @@ def main(argv=None):
             test_data=test_data,
             val_data=val_data,
             opt_state=opt_state,
+            h_sol_func=h_sol_func, h_an_func=h_an_func,
+            J_sol_sol_func=j_sol_sol_func, J_sol_an_func=j_sol_an_func,
+            J_an_an_func=j_an_an_func,
             random_seed=trial_seed,
         )
         elapsed = time.time() - t0
@@ -281,6 +400,9 @@ def main(argv=None):
     parity_results(
         {"train": train_data, "val": val_data, "test": test_data},
         best_params,
+        h_sol_func=h_sol_func, h_an_func=h_an_func,
+        J_sol_sol_func=j_sol_sol_func, J_sol_an_func=j_sol_an_func,
+        J_an_an_func=j_an_an_func,
     )
 
     # ------------------------------------------------------------------
