@@ -18,3 +18,14 @@ checkpoint: trained_params.pkl
 learning_rate:   0.01
 lr_decay_steps:  100
 lr_decay_rate:   0.99
+
+# --- Term-function overrides (optional) ---
+# Specify a function name from IsingLHCE.interactions to replace the default.
+# Add your new function to interactions.py, then reference it by name here.
+# Omit a field (or set to null) to keep the package default.
+#
+# h_sol_func:     null   # default: expfunc(dn_eff) + logfunc(x),  5 params
+# h_an_func:      null   # default: expfunc(dn_an)  + logfunc(x),  5 params
+# j_sol_sol_func: null   # default: DN/AN cross + DN-DN + AN-AN,  16 params
+# j_sol_an_func:  null   # default: sol_sol_func(dn_an, an_sol),   6 params
+# j_an_an_func:   null   # default: sol_sol_func(dn_i, dn_j),      6 params
