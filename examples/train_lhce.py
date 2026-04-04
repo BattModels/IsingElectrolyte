@@ -161,6 +161,9 @@ DEFAULTS = {
     "j_sol_sol_func":  None,
     "j_sol_an_func":   None,
     "j_an_an_func":    None,
+    # Optional kwargs forwarded verbatim to initialize_params() each trial.
+    # 'random_seed' is always computed per-trial and is silently ignored here.
+    "initialize_params_kwargs": {},
 }
 
 
@@ -215,6 +218,10 @@ def _load_config(argv):
     for required in ("train", "val", "test"):
         if cfg[required] is None:
             parser.error(f"--{required} is required (or set '{required}' in the YAML config)")
+
+    # Normalise initialize_params_kwargs: YAML may produce None for an empty mapping
+    if not cfg.get("initialize_params_kwargs"):
+        cfg["initialize_params_kwargs"] = {}
 
     return cfg
 
@@ -300,6 +307,9 @@ def main(argv=None):
     print(f"  j_sol_sol_func: {j_sol_sol_func.__name__}")
     print(f"  j_sol_an_func:  {j_sol_an_func.__name__}")
     print(f"  j_an_an_func:   {j_an_an_func.__name__}")
+    _ip_kwargs_display = {k: v for k, v in cfg["initialize_params_kwargs"].items()
+                          if k != "random_seed"}
+    print(f"  initialize_params_kwargs: {_ip_kwargs_display}  (random_seed per trial)")
     print()
 
     # ------------------------------------------------------------------
@@ -326,7 +336,10 @@ def main(argv=None):
         trial_seed = cfg["seed"] + trial * 10
         print(f"\n--- Trial {trial + 1}/{cfg['trials']}  (seed={trial_seed}) ---")
 
-        params = initialize_params(mode="from_scratch", random_seed=trial_seed)
+        ip_kwargs = dict(cfg["initialize_params_kwargs"])
+        ip_kwargs.pop("random_seed", None)   # always per-trial, never user-overridable
+        ip_kwargs["random_seed"] = trial_seed
+        params = initialize_params(**ip_kwargs)
 
         schedule  = optax.exponential_decay(
             cfg["learning_rate"], cfg["lr_decay_steps"], cfg["lr_decay_rate"]
