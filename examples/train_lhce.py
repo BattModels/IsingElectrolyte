@@ -25,19 +25,19 @@ Config fields (YAML keys = long CLI flag names)
     lr_decay_rate   Exponential decay rate         (default: 0.99)
 
     # Optional — term function overrides (string names from IsingLHCE.interactions)
-    h_sol_func      Name of h(Li-sol) function     (default: package default)
-    h_an_func       Name of h(Li-anion) function   (default: package default)
-    j_sol_sol_func  Name of J(sol-sol) function    (default: package default)
-    j_sol_an_func   Name of J(sol-anion) function  (default: package default)
-    j_an_an_func    Name of J(anion-anion) function(default: package default)
+    h_sol_func         Name of h(Li-sol) function        (default: package default)
+    h_anion_func       Name of h(Li-anion) function      (default: package default)
+    j_sol_sol_func     Name of J(sol-sol) function       (default: package default)
+    j_sol_anion_func   Name of J(sol-anion) function     (default: package default)
+    j_anion_anion_func Name of J(anion-anion) function   (default: package default)
 
     # Optional - rescale parameter function overrides (string names from IsingLHCE.interactions)
-    rescale_h_sol          Name of h(Li-sol) rescale function       (default: None)
-    rescale_h_an           Name of h(Li-anion) rescale function     (default: None)
-    rescale_J_sol_sol      Name of J(sol-sol) rescale function      (default: None)
-    rescale_J_sol_an       Name of J(sol-anion) rescale function    (default: None)
-    rescale_J_an_an        Name of J(anion-anion) rescale function  (default: None)
-    rescale_conc_factor    Name of concentration rescale function   (default: None)
+    rescale_h_sol            Name of h(Li-sol) rescale function       (default: None)
+    rescale_h_anion          Name of h(Li-anion) rescale function     (default: None)
+    rescale_J_sol_sol        Name of J(sol-sol) rescale function      (default: None)
+    rescale_J_sol_anion      Name of J(sol-anion) rescale function    (default: None)
+    rescale_J_anion_anion    Name of J(anion-anion) rescale function  (default: None)
+    rescale_conc_factor      Name of concentration rescale function   (default: None)
 
     # Optional - monotonicity constraint dict
     monotonicity_dict      Dict mapping param keys to "increase"/"decrease".
@@ -395,22 +395,22 @@ def main(argv=None):
     # Resolve term functions
     # Script-level CUSTOMIZATION values take precedence over YAML/CLI strings.
     # ------------------------------------------------------------------
-    h_sol_func     = _resolve_func(H_SOL_FUNC     or cfg.get("h_sol_func"),     default_h_sol)
-    h_an_func      = _resolve_func(H_AN_FUNC      or cfg.get("h_an_func"),      default_h_an)
-    j_sol_sol_func = _resolve_func(J_SOL_SOL_FUNC or cfg.get("j_sol_sol_func"), default_J_sol_sol)
-    j_sol_an_func  = _resolve_func(J_SOL_AN_FUNC  or cfg.get("j_sol_an_func"),  default_J_sol_an)
-    j_an_an_func   = _resolve_func(J_AN_AN_FUNC   or cfg.get("j_an_an_func"),   default_J_an_an)
+    h_sol_func         = _resolve_func(H_SOL_FUNC         or cfg.get("h_sol_func"),         default_h_sol)
+    h_anion_func       = _resolve_func(H_ANION_FUNC       or cfg.get("h_anion_func"),       default_h_anion)
+    j_sol_sol_func     = _resolve_func(J_SOL_SOL_FUNC     or cfg.get("j_sol_sol_func"),     default_J_sol_sol)
+    j_sol_anion_func   = _resolve_func(J_SOL_ANION_FUNC   or cfg.get("j_sol_anion_func"),   default_J_sol_anion)
+    j_anion_anion_func = _resolve_func(J_ANION_ANION_FUNC or cfg.get("j_anion_anion_func"), default_J_anion_anion)
 
     # -------------------------------------------------------------------
     # Resolve rescale functions (optional)
     # Script-level CUSTOMIZATION values take precedence over YAML/CLI strings.
     # -------------------------------------------------------------------
-    rescale_h_sol      = _resolve_func(RESCALE_H_SOL      or cfg.get("rescale_h_sol"),      None)
-    rescale_h_an       = _resolve_func(RESCALE_H_AN       or cfg.get("rescale_h_an"),       None)
-    rescale_J_sol_sol     = _resolve_func(RESCALE_J_SOL_SOL  or cfg.get("rescale_J_sol_sol"),  None)
-    rescale_J_sol_an      = _resolve_func(RESCALE_J_SOL_AN   or cfg.get("rescale_J_sol_an"),   None)
-    rescale_J_an_an       = _resolve_func(RESCALE_J_AN_AN    or cfg.get("rescale_J_an_an"),    None)
-    rescale_conc_factor   = _resolve_func(RESCALE_CONC_FACTOR or cfg.get("rescale_conc_factor"), None)
+    rescale_h_sol          = _resolve_func(RESCALE_H_SOL          or cfg.get("rescale_h_sol"),          None)
+    rescale_h_anion        = _resolve_func(RESCALE_H_ANION        or cfg.get("rescale_h_anion"),        None)
+    rescale_J_sol_sol      = _resolve_func(RESCALE_J_SOL_SOL      or cfg.get("rescale_J_sol_sol"),      None)
+    rescale_J_sol_anion    = _resolve_func(RESCALE_J_SOL_ANION    or cfg.get("rescale_J_sol_anion"),    None)
+    rescale_J_anion_anion  = _resolve_func(RESCALE_J_ANION_ANION  or cfg.get("rescale_J_anion_anion"),  None)
+    rescale_conc_factor    = _resolve_func(RESCALE_CONC_FACTOR     or cfg.get("rescale_conc_factor"),    None)
 
     # -------------------------------------------------------------------
     # Resolve monotonicity dict
@@ -429,17 +429,17 @@ def main(argv=None):
     print(f"  epochs:   {cfg['epochs']}  trials: {cfg['trials']}  seed: {cfg['seed']}")
     print(f"  lr:       {cfg['learning_rate']}  decay_steps: {cfg['lr_decay_steps']}  decay_rate: {cfg['lr_decay_rate']}")
     print(f"  checkpoint: {cfg['checkpoint']}")
-    print(f"  h_sol_func:     {h_sol_func.__name__}")
-    print(f"  h_an_func:      {h_an_func.__name__}")
-    print(f"  j_sol_sol_func: {j_sol_sol_func.__name__}")
-    print(f"  j_sol_an_func:  {j_sol_an_func.__name__}")
-    print(f"  j_an_an_func:   {j_an_an_func.__name__}")
-    print(f"  rescale_h_sol:      {rescale_h_sol.__name__ if rescale_h_sol else None}")
-    print(f"  rescale_h_an:       {rescale_h_an.__name__ if rescale_h_an else None}")
-    print(f"  rescale_J_sol_sol:  {rescale_J_sol_sol.__name__ if rescale_J_sol_sol else None}")
-    print(f"  rescale_J_sol_an:   {rescale_J_sol_an.__name__ if rescale_J_sol_an else None}")
-    print(f"  rescale_J_an_an:    {rescale_J_an_an.__name__ if rescale_J_an_an else None}")
-    print(f"  rescale_conc_factor: {rescale_conc_factor.__name__ if rescale_conc_factor else None}")
+    print(f"  h_sol_func:         {h_sol_func.__name__}")
+    print(f"  h_anion_func:       {h_anion_func.__name__}")
+    print(f"  j_sol_sol_func:     {j_sol_sol_func.__name__}")
+    print(f"  j_sol_anion_func:   {j_sol_anion_func.__name__}")
+    print(f"  j_anion_anion_func: {j_anion_anion_func.__name__}")
+    print(f"  rescale_h_sol:          {rescale_h_sol.__name__ if rescale_h_sol else None}")
+    print(f"  rescale_h_anion:        {rescale_h_anion.__name__ if rescale_h_anion else None}")
+    print(f"  rescale_J_sol_sol:      {rescale_J_sol_sol.__name__ if rescale_J_sol_sol else None}")
+    print(f"  rescale_J_sol_anion:    {rescale_J_sol_anion.__name__ if rescale_J_sol_anion else None}")
+    print(f"  rescale_J_anion_anion:  {rescale_J_anion_anion.__name__ if rescale_J_anion_anion else None}")
+    print(f"  rescale_conc_factor:    {rescale_conc_factor.__name__ if rescale_conc_factor else None}")
     _ip_kwargs_display = {k: v for k, v in cfg["initialize_params_kwargs"].items()
                           if k != "random_seed"}
     print(f"  initialize_params_kwargs: {_ip_kwargs_display}  (random_seed per trial)")
@@ -491,15 +491,15 @@ def main(argv=None):
             val_data=val_data,
             opt_state=opt_state,
             monotonicity_dict=monotonicity_dict,
-            h_sol_func=h_sol_func, h_an_func=h_an_func,
-            J_sol_sol_func=j_sol_sol_func, J_sol_an_func=j_sol_an_func,
-            J_an_an_func=j_an_an_func,
-            rescale_h_sol = rescale_h_sol,
-            rescale_h_an = rescale_h_an,
-            rescale_J_sol_sol = rescale_J_sol_sol,
-            rescale_J_sol_an = rescale_J_sol_an,
-            rescale_J_an_an = rescale_J_an_an,
-            rescale_conc_factor = rescale_conc_factor,
+            h_sol_func=h_sol_func, h_anion_func=h_anion_func,
+            J_sol_sol_func=j_sol_sol_func, J_sol_anion_func=j_sol_anion_func,
+            J_anion_anion_func=j_anion_anion_func,
+            rescale_h_sol=rescale_h_sol,
+            rescale_h_anion=rescale_h_anion,
+            rescale_J_sol_sol=rescale_J_sol_sol,
+            rescale_J_sol_anion=rescale_J_sol_anion,
+            rescale_J_anion_anion=rescale_J_anion_anion,
+            rescale_conc_factor=rescale_conc_factor,
             random_seed=trial_seed,
         )
         elapsed = time.time() - t0
@@ -555,14 +555,14 @@ def main(argv=None):
         {"train": train_data, "val": val_data, "test": test_data},
         best_params,
         monotonicity_dict=monotonicity_dict,
-        h_sol_func=h_sol_func, h_an_func=h_an_func,
-        J_sol_sol_func=j_sol_sol_func, J_sol_an_func=j_sol_an_func,
-        J_an_an_func=j_an_an_func,
+        h_sol_func=h_sol_func, h_anion_func=h_anion_func,
+        J_sol_sol_func=j_sol_sol_func, J_sol_anion_func=j_sol_anion_func,
+        J_anion_anion_func=j_anion_anion_func,
         rescale_h_sol=rescale_h_sol,
-        rescale_h_an=rescale_h_an,
+        rescale_h_anion=rescale_h_anion,
         rescale_J_sol_sol=rescale_J_sol_sol,
-        rescale_J_sol_an=rescale_J_sol_an,
-        rescale_J_an_an=rescale_J_an_an,
+        rescale_J_sol_anion=rescale_J_sol_anion,
+        rescale_J_anion_anion=rescale_J_anion_anion,
         rescale_conc_factor=rescale_conc_factor,
     )
 

@@ -24,20 +24,20 @@ lr_decay_rate:   0.99
 # Add your new function to interactions.py, then reference it by name here.
 # Omit a field (or set to null) to keep the package default.
 #
-# h_sol_func:     null   # default: expfunc(dn_eff) + logfunc(x),  5 params
-# h_an_func:      null   # default: expfunc(dn_an)  + logfunc(x),  5 params
-# j_sol_sol_func: null   # default: DN/AN cross + DN-DN + AN-AN,  16 params
-# j_sol_an_func:  null   # default: sol_sol_func(dn_an, an_sol),   6 params
-# j_an_an_func:   null   # default: sol_sol_func(dn_i, dn_j),      6 params
+# h_sol_func:          null   # default: expfunc(dn_eff) + logfunc(x),  5 params
+# h_anion_func:        null   # default: expfunc(dn_anion) + logfunc(x),  5 params
+# j_sol_sol_func:      null   # default: DN/AN cross + DN-DN + AN-AN,  16 params
+# j_sol_anion_func:    null   # default: sol_sol_func(dn_anion, an_sol),   6 params
+# j_anion_anion_func:  null   # default: sol_sol_func(dn_i, dn_j),      6 params
 
 # --- Optional rescale function overrides (string names from IsingLHCE.interactions) ---
 # These functions rescale the parameters through jnp.softplus to ensure desired monotonicity constraints
-rescale_h_sol:      default_h_sol_rescale  # default: decrease with DN
-rescale_h_an:       h_an_conc_step_rescale # default: decrease with DN
-rescale_J_sol_sol:  default_J_sol_sol_rescale # default: decrease with DN/AN
-rescale_J_sol_an:   default_J_sol_an_rescale # default: decrease with DN/AN
-rescale_J_an_an:    J_an_an_conc_step_rescale # default: increase with DN
-rescale_conc_factor: default_conc_factor_rescale # default: increase with concentration and volume
+rescale_h_sol:           default_h_sol_rescale          # default: decrease with DN
+rescale_h_anion:         default_h_anion_rescale        # default: decrease with DN
+rescale_J_sol_sol:       default_J_sol_sol_rescale      # default: decrease with DN/AN
+rescale_J_sol_anion:     default_J_sol_anion_rescale    # default: decrease with DN/AN
+rescale_J_anion_anion:   default_J_anion_anion_rescale  # default: increase with DN
+rescale_conc_factor:     default_conc_factor_rescale    # default: increase with concentration and volume
 
 # --- Monotonicity constraints (optional) ---
 # Controls the sign of softplus-rescaled parameters.
