@@ -29,3 +29,27 @@ lr_decay_rate:   0.99
 # j_sol_sol_func: null   # default: DN/AN cross + DN-DN + AN-AN,  16 params
 # j_sol_an_func:  null   # default: sol_sol_func(dn_an, an_sol),   6 params
 # j_an_an_func:   null   # default: sol_sol_func(dn_i, dn_j),      6 params
+
+# --- Parameter initialization (optional) ---
+# Keys map directly to initialize_params() kwargs.
+# 'random_seed' is always computed per-trial and is ignored if set here.
+# If 'mode' is omitted, initialize_params() defaults to "from_file".
+#
+# From-scratch (explicit):
+# initialize_params_kwargs:
+#   mode: from_scratch
+#
+# From checkpoint:
+# initialize_params_kwargs:
+#   mode: from_file
+#   file_path: /path/to/checkpoint.pkl
+#
+# Custom parameter sizes (for non-default interaction functions).
+# Arrays with custom sizes are initialized as zeros + noise.
+# Default sizes: sol_params_dn=5, salt_params_dn=5, params_sol_salt_an=6,
+#                params_sol_sol=16, params_anion_anion=6, conc_factor_sol=8
+# initialize_params_kwargs:
+#   mode: from_scratch
+#   param_sizes:
+#     params_sol_sol: 9
+#     sol_params_dn: 8

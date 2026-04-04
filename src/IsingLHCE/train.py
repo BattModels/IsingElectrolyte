@@ -139,6 +139,50 @@ def total_objective(
     return mean_loss, new_inits
 
 
+#: Default number of elements in each trainable parameter array.
+#: Used by initialize_params to decide whether to apply hand-tuned initial
+#: values or zeros + noise when a custom size is requested via param_sizes=.
+_DEFAULT_PARAM_SIZES = {
+    "sol_params_dn":      5,
+    "salt_params_dn":     5,
+    "params_sol_salt_an": 6,
+    "params_sol_sol":     16,
+    "params_anion_anion": 6,
+    "conc_factor_sol":    8,
+}
+
+# Hand-tuned starting points for the default parameter sizes.
+# None signals "always zero-initialize" (additive noise only).
+_HAND_TUNED_PARAMS = {
+    "sol_params_dn": jnp.array([
+        -1.4226977825164795, 0.6868864893913269, -1.29103684425354,
+        -2.2087085247039795, -2.837172,
+    ]),
+    "salt_params_dn": jnp.array([
+        -1.933838129043579, 0.21721802651882172, -1.0301377773284912,
+        -2.815300941467285, -1.930697,
+    ]),
+    "params_sol_salt_an": jnp.array([
+        -0.28391966223716736, -0.4041173458099365, 0.6561649441719055,
+        -2.1234798431396484, -1.09547758102417, -1.3783741,
+    ]),
+    "params_sol_sol": jnp.array([
+        0.11802631616592407, 0.04696842283010483, 0.039969541132450104,
+        -3.7262208461761475, -3.0505568981170654, -0.10816801339387894,
+        -2.2049686908721924, 0.375214546918869, -3.009303092956543,
+        -2.591977834701538, -0.11441854387521744, -2.53210186958313,
+        0.3858657479286194, -2.321645736694336, -2.3250560760498047,
+        -3.2535532,
+    ]),
+    "params_anion_anion": None,   # 6-element anion-anion; always zero-initialized
+    "conc_factor_sol": jnp.array([
+        0.6028587818145752, 0.5641694664955139, -0.0062898872420191765,
+        -1.0074571371078491, -2177.35791015625, 2189.39013671875,
+        -6.164828777313232, 2.281510829925537,
+    ]),
+}
+
+
 def initialize_params(
     mode="from_file",
     file_path=None,
@@ -146,102 +190,58 @@ def initialize_params(
     hidden_dim=4,
     output_dim=1,
     random_seed=42,
+    param_sizes=None,
 ):
-    if mode == "from_scratch":
-        sol_params_dn = jnp.array(
-            [
-                -1.4226977825164795,
-                0.6868864893913269,
-                -1.29103684425354,
-                -2.2087085247039795,
-                -2.837172,
-            ]
-        )
-        salt_params_dn = jnp.array(
-            [
-                -1.933838129043579,
-                0.21721802651882172,
-                -1.0301377773284912,
-                -2.815300941467285,
-                -1.930697,
-            ]
-        )
-        params_sol_salt_an = jnp.array(
-            [
-                -0.28391966223716736,
-                -0.4041173458099365,
-                0.6561649441719055,
-                -2.1234798431396484,
-                -1.09547758102417,
-                -1.3783741,
-            ]
-        )
-        params_sol_sol = jnp.array(
-            [
-                0.11802631616592407,
-                0.04696842283010483,
-                0.039969541132450104,
-                -3.7262208461761475,
-                -3.0505568981170654,
-                -0.10816801339387894,
-                -2.2049686908721924,
-                0.375214546918869,
-                -3.009303092956543,
-                -2.591977834701538,
-                -0.11441854387521744,
-                -2.53210186958313,
-                0.3858657479286194,
-                -2.321645736694336,
-                -2.3250560760498047,
-                -3.2535532,
-            ]
-        )
-        # 6-element anion-anion coupling (sol_sol_func form); initialised near zero
-        params_anion_anion = jnp.zeros(6)
-        conc_factor_sol = jnp.array(
-            [
-                0.6028587818145752,
-                0.5641694664955139,
-                -0.0062898872420191765,
-                -1.0074571371078491,
-                -2177.35791015625,
-                2189.39013671875,
-                -6.164828777313232,
-                2.281510829925537,
-            ]
-        )
+    """Initialize the parameter dict for the Ising LHCE model.
 
-        # add random noise to the initial params
+    Args:
+        mode:        "from_scratch" or "from_file".
+        file_path:   Required when mode="from_file". Path to a .pkl checkpoint.
+        random_seed: PRNG seed for additive/multiplicative initialization noise.
+        param_sizes: Optional dict mapping parameter names to custom array lengths.
+                     Keys absent from param_sizes use their default size.
+                     Arrays with a custom (non-default) size are initialized as
+                     zeros + noise because the hand-tuned values are only valid
+                     for the default parameter semantics.
+                     Example: {"params_sol_sol": 9, "sol_params_dn": 8}
+                     Default sizes: sol_params_dn=5, salt_params_dn=5,
+                     params_sol_salt_an=6, params_sol_sol=16,
+                     params_anion_anion=6, conc_factor_sol=8.
+                     Ignored when mode="from_file" (sizes come from checkpoint).
+
+    Returns:
+        dict with keys: sol_params_dn, salt_params_dn, params_sol_salt_an,
+        params_sol_sol, params_anion_anion, conc_factor_sol.
+    """
+    if mode == "from_scratch":
+        # Resolve effective sizes — default unless overridden by param_sizes.
+        _sizes = dict(_DEFAULT_PARAM_SIZES)
+        if param_sizes:
+            for k, v in param_sizes.items():
+                if k in _sizes:
+                    _sizes[k] = int(v)
+
+        # PRNG keys: split order matches _DEFAULT_PARAM_SIZES insertion order
+        # (sol_params_dn, salt_params_dn, params_sol_salt_an, params_sol_sol,
+        #  params_anion_anion, conc_factor_sol) so that keys[i] assignments are
+        # deterministic and identical to the original hard-coded behavior for
+        # default sizes. num=7 preserves the original PRNG sequence exactly.
         key = random.PRNGKey(random_seed)
-        keys = random.split(key, num=7)
+        keys = random.split(key, num=len(_DEFAULT_PARAM_SIZES) + 1)
         noise_scale = 0.05
-        sol_params_dn = sol_params_dn * (1.0 + noise_scale * random.normal(
-            keys[0], shape=sol_params_dn.shape
-        ))
-        salt_params_dn = salt_params_dn * (1.0 + noise_scale * random.normal(
-            keys[1], shape=salt_params_dn.shape
-        ))
-        params_sol_salt_an = params_sol_salt_an * (1.0 + noise_scale * random.normal(
-            keys[2], shape=params_sol_salt_an.shape
-        ))
-        params_sol_sol = params_sol_sol * (1.0 + noise_scale * random.normal(
-            keys[3], shape=params_sol_sol.shape
-        ))
-        # params_anion_anion starts at zero: use additive noise
-        params_anion_anion = params_anion_anion + noise_scale * random.normal(
-            keys[4], shape=params_anion_anion.shape
-        )
-        conc_factor_sol = conc_factor_sol * (1.0 + noise_scale * random.normal(
-            keys[5], shape=conc_factor_sol.shape
-        ))
-        init_params = {
-            "sol_params_dn": sol_params_dn,
-            "salt_params_dn": salt_params_dn,
-            "params_sol_salt_an": params_sol_salt_an,
-            "params_sol_sol": params_sol_sol,
-            "params_anion_anion": params_anion_anion,
-            "conc_factor_sol": conc_factor_sol,
-        }
+
+        init_params = {}
+        for i, name in enumerate(_DEFAULT_PARAM_SIZES):
+            size = _sizes[name]
+            base = _HAND_TUNED_PARAMS[name]
+            if base is not None and size == _DEFAULT_PARAM_SIZES[name]:
+                # Default size with hand-tuned starting point: multiplicative noise
+                arr = base * (1.0 + noise_scale * random.normal(keys[i], shape=base.shape))
+            else:
+                # Custom size or inherently zero-initialized: additive noise from zeros
+                arr = jnp.zeros(size) + noise_scale * random.normal(keys[i], shape=(size,))
+            init_params[name] = arr
+
         return init_params
 
     elif mode == "from_file":
@@ -255,28 +255,15 @@ def initialize_params(
                 "It was likely saved with the legacy interface which used 'params_salt' (5 elements). "
                 "Please re-initialize from scratch with initialize_params(mode='from_scratch')."
             )
-        # add random noise to the initial params
+        # add random noise to the loaded params (sizes come from the checkpoint)
         key = random.PRNGKey(random_seed)
-        keys = random.split(key, num=7)
+        keys = random.split(key, num=len(_DEFAULT_PARAM_SIZES) + 1)
         noise_scale = 0.05
-        init_params['sol_params_dn'] = init_params['sol_params_dn'] * (1.0 + noise_scale * random.normal(
-            keys[0], shape=init_params['sol_params_dn'].shape
-        ))
-        init_params['salt_params_dn'] = init_params['salt_params_dn'] * (1.0 + noise_scale * random.normal(
-            keys[1], shape=init_params['salt_params_dn'].shape
-        ))
-        init_params['params_sol_salt_an'] = init_params['params_sol_salt_an'] * (1.0 + noise_scale * random.normal(
-            keys[2], shape=init_params['params_sol_salt_an'].shape
-        ))
-        init_params['params_sol_sol'] = init_params['params_sol_sol'] * (1.0 + noise_scale * random.normal(
-            keys[3], shape=init_params['params_sol_sol'].shape
-        ))
-        init_params['params_anion_anion'] = init_params['params_anion_anion'] * (1.0 + noise_scale * random.normal(
-            keys[4], shape=init_params['params_anion_anion'].shape
-        ))
-        init_params['conc_factor_sol'] = init_params['conc_factor_sol'] * (1.0 + noise_scale * random.normal(
-            keys[5], shape=init_params['conc_factor_sol'].shape
-        ))
+        for i, name in enumerate(_DEFAULT_PARAM_SIZES):
+            arr = init_params[name]
+            init_params[name] = arr * (1.0 + noise_scale * random.normal(
+                keys[i], shape=arr.shape
+            ))
         return init_params
 
 
