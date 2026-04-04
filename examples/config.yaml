@@ -71,6 +71,25 @@ rescale_conc_factor: default_conc_factor_rescale # default: increase with concen
 # Example — disable all monotonicity constraints:
 # monotonicity_dict: {}
 
+# --- Extra per-species descriptors (optional) ---
+# Load additional molecular properties from CSV columns and pass them to
+# custom h/J functions via the props dict.  Standard keys (dn, an, x, v)
+# are always present; specify only the extras here.
+#
+# Each entry maps a property name to an ordered list of CSV column names,
+# one per species (in the same order as the standard solvent/anion columns).
+# The values are stacked to shape (n, n_species) — same layout as dn/an/x/v.
+#
+# Example — add polarizability for 2 solvents and 1 anion:
+# extra_sol_columns:
+#   polarizability:
+#     - "Solvent Polarizability"
+#     - "Diluent Polarizability"
+#
+# extra_anion_columns:
+#   polarizability:
+#     - "Anion Polarizability"
+
 # --- Parameter initialization (optional) ---
 # Keys map directly to initialize_params() kwargs.
 # 'random_seed' is always computed per-trial and is ignored if set here.

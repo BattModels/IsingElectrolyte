@@ -12,10 +12,10 @@ from functools import partial
 
 from .model import _find_root_impl, DEFAULT_MONOTONICITY, _freeze_mono
 from .interactions import (
-    default_h_sol, default_h_an,
-    default_J_sol_sol, default_J_sol_an, default_J_an_an,
-    default_h_sol_rescale, default_h_an_rescale,
-    default_J_sol_sol_rescale, default_J_sol_an_rescale, default_J_an_an_rescale,
+    default_h_sol, default_h_anion,
+    default_J_sol_sol, default_J_sol_anion, default_J_anion_anion,
+    default_h_sol_rescale, default_h_anion_rescale,
+    default_J_sol_sol_rescale, default_J_sol_anion_rescale, default_J_anion_anion_rescale,
     default_conc_factor_rescale,
 )
 
@@ -28,52 +28,51 @@ optimizer = None
 
 def objective_single(
     input_params,
-    dn_sol, an_sol, x_sol, v_sol,
-    dn_an, x_an, v_an,
+    sol_props, anion_props,
     z,
     targets,
     init_guess,
     monotonicity_dict=None,
     h_sol_func=default_h_sol,
-    h_an_func=default_h_an,
+    h_anion_func=default_h_anion,
     J_sol_sol_func=default_J_sol_sol,
-    J_sol_an_func=default_J_sol_an,
-    J_an_an_func=default_J_an_an,
+    J_sol_anion_func=default_J_sol_anion,
+    J_anion_anion_func=default_J_anion_anion,
     rescale_h_sol=default_h_sol_rescale,
-    rescale_h_an=default_h_an_rescale,
+    rescale_h_anion=default_h_anion_rescale,
     rescale_J_sol_sol=default_J_sol_sol_rescale,
-    rescale_J_sol_an=default_J_sol_an_rescale,
-    rescale_J_an_an=default_J_an_an_rescale,
+    rescale_J_sol_anion=default_J_sol_anion_rescale,
+    rescale_J_anion_anion=default_J_anion_anion_rescale,
     rescale_conc_factor=default_conc_factor_rescale,
 ):
     """Compute the squared loss for a single data point.
 
     Args:
-        input_params:           parameter dict (must include params_anion_anion)
-        dn_sol, an_sol, x_sol, v_sol: shape (N,) arrays for solvents
-        dn_an, x_an, v_an:            shape (M,) arrays for anions
-        z:                      coordination number (scalar)
-        targets:                target occupation fractions, shape (N+M,)
-        init_guess:             initial guess for the root solver, shape (N+M,)
-        monotonicity_dict:      frozenset from _freeze_mono(), or None for default.
-        h_sol_func, h_an_func, J_sol_sol_func, J_sol_an_func, J_an_an_func:
-                                injectable term functions (defaults = current physics).
-        rescale_h_sol, rescale_h_an, rescale_J_sol_sol, rescale_J_sol_an,
-        rescale_J_an_an, rescale_conc_factor:
-                                companion rescaling functions.
+        input_params:  parameter dict (must include params_anion_anion)
+        sol_props:     dict with keys "dn","an","x","v" — shape (N,) arrays
+        anion_props:   dict with keys "dn","x","v" — shape (M,) arrays
+        z:             coordination number (scalar)
+        targets:       target occupation fractions, shape (N+M,)
+        init_guess:    initial guess for the root solver, shape (N+M,)
+        monotonicity_dict: frozenset from _freeze_mono(), or None for default.
+        h_sol_func, h_anion_func, J_sol_sol_func, J_sol_anion_func, J_anion_anion_func:
+                       injectable term functions (defaults = current physics).
+        rescale_h_sol, rescale_h_anion, rescale_J_sol_sol, rescale_J_sol_anion,
+        rescale_J_anion_anion, rescale_conc_factor:
+                       companion rescaling functions.
 
     Returns:
         (loss, new_init): squared loss (scalar), updated initial guess shape (N+M,)
     """
     occupations, found_valid = _find_root_impl(
-        input_params, dn_sol, an_sol, x_sol, v_sol, dn_an, x_an, v_an, z,
+        input_params, sol_props, anion_props, z,
         init_guess, max_tries=10, monotonicity_dict=monotonicity_dict,
-        h_sol_func=h_sol_func, h_an_func=h_an_func,
-        J_sol_sol_func=J_sol_sol_func, J_sol_an_func=J_sol_an_func,
-        J_an_an_func=J_an_an_func,
-        rescale_h_sol=rescale_h_sol, rescale_h_an=rescale_h_an,
-        rescale_J_sol_sol=rescale_J_sol_sol, rescale_J_sol_an=rescale_J_sol_an,
-        rescale_J_an_an=rescale_J_an_an, rescale_conc_factor=rescale_conc_factor,
+        h_sol_func=h_sol_func, h_anion_func=h_anion_func,
+        J_sol_sol_func=J_sol_sol_func, J_sol_anion_func=J_sol_anion_func,
+        J_anion_anion_func=J_anion_anion_func,
+        rescale_h_sol=rescale_h_sol, rescale_h_anion=rescale_h_anion,
+        rescale_J_sol_sol=rescale_J_sol_sol, rescale_J_sol_anion=rescale_J_sol_anion,
+        rescale_J_anion_anion=rescale_J_anion_anion, rescale_conc_factor=rescale_conc_factor,
     )
     loss = jnp.sum((occupations - targets) ** 2)
     new_init = jnp.where(found_valid, occupations, init_guess)
@@ -82,55 +81,55 @@ def objective_single(
 
 @partial(jax.jit, static_argnames=(
     "monotonicity_dict",
-    "h_sol_func", "h_an_func",
-    "J_sol_sol_func", "J_sol_an_func", "J_an_an_func",
-    "rescale_h_sol", "rescale_h_an",
-    "rescale_J_sol_sol", "rescale_J_sol_an", "rescale_J_an_an",
+    "h_sol_func", "h_anion_func",
+    "J_sol_sol_func", "J_sol_anion_func", "J_anion_anion_func",
+    "rescale_h_sol", "rescale_h_anion",
+    "rescale_J_sol_sol", "rescale_J_sol_anion", "rescale_J_anion_anion",
     "rescale_conc_factor",
 ))
 def total_objective(
     params, data, monotonicity_dict=None,
     h_sol_func=default_h_sol,
-    h_an_func=default_h_an,
+    h_anion_func=default_h_anion,
     J_sol_sol_func=default_J_sol_sol,
-    J_sol_an_func=default_J_sol_an,
-    J_an_an_func=default_J_an_an,
+    J_sol_anion_func=default_J_sol_anion,
+    J_anion_anion_func=default_J_anion_anion,
     rescale_h_sol=default_h_sol_rescale,
-    rescale_h_an=default_h_an_rescale,
+    rescale_h_anion=default_h_anion_rescale,
     rescale_J_sol_sol=default_J_sol_sol_rescale,
-    rescale_J_sol_an=default_J_sol_an_rescale,
-    rescale_J_an_an=default_J_an_an_rescale,
+    rescale_J_sol_anion=default_J_sol_anion_rescale,
+    rescale_J_anion_anion=default_J_anion_anion_rescale,
     rescale_conc_factor=default_conc_factor_rescale,
 ):
     """Compute RMSE loss over all data points.
 
     data must contain:
-        dn_sol, an_sol, x_sol, v_sol: shape (n, N) arrays for solvents
-        dn_an, x_an, v_an:            shape (n, M) arrays for anions
-        z:                            shape (n,) coordination numbers
-        targets:                      shape (n, N+M) target occupation fractions
-        init_guess:                   shape (n, N+M)
+        sol_props:   dict with keys "dn","an","x","v" — shape (n, N) arrays per key
+        anion_props: dict with keys "dn","x","v" — shape (n, M) arrays per key
+        z:           shape (n,) coordination numbers
+        targets:     shape (n, N+M) target occupation fractions
+        init_guess:  shape (n, N+M)
     monotonicity_dict: frozenset from _freeze_mono(), or None for default.
-    h_sol_func, h_an_func, J_sol_sol_func, J_sol_an_func, J_an_an_func:
+    h_sol_func, h_anion_func, J_sol_sol_func, J_sol_anion_func, J_anion_anion_func:
                        injectable term functions (defaults = current physics).
     """
     v_objective = jax.vmap(
         partial(
             objective_single,
             monotonicity_dict=monotonicity_dict,
-            h_sol_func=h_sol_func, h_an_func=h_an_func,
-            J_sol_sol_func=J_sol_sol_func, J_sol_an_func=J_sol_an_func,
-            J_an_an_func=J_an_an_func,
-            rescale_h_sol=rescale_h_sol, rescale_h_an=rescale_h_an,
-            rescale_J_sol_sol=rescale_J_sol_sol, rescale_J_sol_an=rescale_J_sol_an,
-            rescale_J_an_an=rescale_J_an_an, rescale_conc_factor=rescale_conc_factor,
+            h_sol_func=h_sol_func, h_anion_func=h_anion_func,
+            J_sol_sol_func=J_sol_sol_func, J_sol_anion_func=J_sol_anion_func,
+            J_anion_anion_func=J_anion_anion_func,
+            rescale_h_sol=rescale_h_sol, rescale_h_anion=rescale_h_anion,
+            rescale_J_sol_sol=rescale_J_sol_sol, rescale_J_sol_anion=rescale_J_sol_anion,
+            rescale_J_anion_anion=rescale_J_anion_anion, rescale_conc_factor=rescale_conc_factor,
         ),
-        in_axes=(None, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
+        in_axes=(None, 0, 0, 0, 0, 0),
     )
     losses, new_inits = v_objective(
         params,
-        data["dn_sol"], data["an_sol"], data["x_sol"], data["v_sol"],
-        data["dn_an"], data["x_an"], data["v_an"],
+        data["sol_props"],
+        data["anion_props"],
         data["z"],
         data["targets"],
         data["init_guess"],
@@ -269,36 +268,36 @@ def initialize_params(
 
 @partial(jax.jit, static_argnames=(
     "monotonicity_dict",
-    "h_sol_func", "h_an_func",
-    "J_sol_sol_func", "J_sol_an_func", "J_an_an_func",
-    "rescale_h_sol", "rescale_h_an",
-    "rescale_J_sol_sol", "rescale_J_sol_an", "rescale_J_an_an",
+    "h_sol_func", "h_anion_func",
+    "J_sol_sol_func", "J_sol_anion_func", "J_anion_anion_func",
+    "rescale_h_sol", "rescale_h_anion",
+    "rescale_J_sol_sol", "rescale_J_sol_anion", "rescale_J_anion_anion",
     "rescale_conc_factor",
 ))
 def update(
     params, opt_state, data, monotonicity_dict=None,
     h_sol_func=default_h_sol,
-    h_an_func=default_h_an,
+    h_anion_func=default_h_anion,
     J_sol_sol_func=default_J_sol_sol,
-    J_sol_an_func=default_J_sol_an,
-    J_an_an_func=default_J_an_an,
+    J_sol_anion_func=default_J_sol_anion,
+    J_anion_anion_func=default_J_anion_anion,
     rescale_h_sol=default_h_sol_rescale,
-    rescale_h_an=default_h_an_rescale,
+    rescale_h_anion=default_h_anion_rescale,
     rescale_J_sol_sol=default_J_sol_sol_rescale,
-    rescale_J_sol_an=default_J_sol_an_rescale,
-    rescale_J_an_an=default_J_an_an_rescale,
+    rescale_J_sol_anion=default_J_sol_anion_rescale,
+    rescale_J_anion_anion=default_J_anion_anion_rescale,
     rescale_conc_factor=default_conc_factor_rescale,
 ):
     (loss, new_inits), grads = jax.value_and_grad(
         partial(
             total_objective,
             monotonicity_dict=monotonicity_dict,
-            h_sol_func=h_sol_func, h_an_func=h_an_func,
-            J_sol_sol_func=J_sol_sol_func, J_sol_an_func=J_sol_an_func,
-            J_an_an_func=J_an_an_func,
-            rescale_h_sol=rescale_h_sol, rescale_h_an=rescale_h_an,
-            rescale_J_sol_sol=rescale_J_sol_sol, rescale_J_sol_an=rescale_J_sol_an,
-            rescale_J_an_an=rescale_J_an_an, rescale_conc_factor=rescale_conc_factor,
+            h_sol_func=h_sol_func, h_anion_func=h_anion_func,
+            J_sol_sol_func=J_sol_sol_func, J_sol_anion_func=J_sol_anion_func,
+            J_anion_anion_func=J_anion_anion_func,
+            rescale_h_sol=rescale_h_sol, rescale_h_anion=rescale_h_anion,
+            rescale_J_sol_sol=rescale_J_sol_sol, rescale_J_sol_anion=rescale_J_sol_anion,
+            rescale_J_anion_anion=rescale_J_anion_anion, rescale_conc_factor=rescale_conc_factor,
         ), has_aux=True
     )(params, data)
     updates, opt_state = optimizer.update(grads, opt_state, params)
@@ -306,18 +305,29 @@ def update(
     return params, opt_state, loss, new_inits
 
 
+def _take_batch(data, idx):
+    """Slice a data dict (possibly with nested dicts) along axis 0."""
+    result = {}
+    for k, v in data.items():
+        if isinstance(v, dict):
+            result[k] = {kk: jnp.take(vv, idx, axis=0) for kk, vv in v.items()}
+        else:
+            result[k] = jnp.take(v, idx, axis=0)
+    return result
+
+
 def train(params, num_epochs, train_data, test_data, val_data, opt_state,
           monotonicity_dict=DEFAULT_MONOTONICITY,
           h_sol_func=default_h_sol,
-          h_an_func=default_h_an,
+          h_anion_func=default_h_anion,
           J_sol_sol_func=default_J_sol_sol,
-          J_sol_an_func=default_J_sol_an,
-          J_an_an_func=default_J_an_an,
+          J_sol_anion_func=default_J_sol_anion,
+          J_anion_anion_func=default_J_anion_anion,
           rescale_h_sol=default_h_sol_rescale,
-          rescale_h_an=default_h_an_rescale,
+          rescale_h_anion=default_h_anion_rescale,
           rescale_J_sol_sol=default_J_sol_sol_rescale,
-          rescale_J_sol_an=default_J_sol_an_rescale,
-          rescale_J_an_an=default_J_an_an_rescale,
+          rescale_J_sol_anion=default_J_sol_anion_rescale,
+          rescale_J_anion_anion=default_J_anion_anion_rescale,
           rescale_conc_factor=default_conc_factor_rescale,
           random_seed=42):
     # Initialize backup variables
@@ -335,7 +345,8 @@ def train(params, num_epochs, train_data, test_data, val_data, opt_state,
 
     # Infer dataset sizes and species count from data
     n_train = train_data["targets"].shape[0]
-    n_species = train_data["dn_sol"].shape[1] + train_data["dn_an"].shape[1]
+    n_species = (train_data["sol_props"]["dn"].shape[1]
+                 + train_data["anion_props"]["dn"].shape[1])
     init_guess_train = jnp.full((n_train, n_species), 1.0 / n_species)
 
     n_test = test_data["targets"].shape[0]
@@ -357,19 +368,19 @@ def train(params, num_epochs, train_data, test_data, val_data, opt_state,
         epoch_loss = 0.0
         for step in range(steps_per_ep):
             batch_idx = perm[step * batch_size : (step + 1) * batch_size]
-            # Create a batch of data
-            batch = {k: jnp.take(v, batch_idx, axis=0) for k, v in train_data.items()}
+            # Create a batch of data (handles nested dicts for sol_props/anion_props)
+            batch = _take_batch(train_data, batch_idx)
             batch['init_guess'] = jnp.take(init_guess_train, batch_idx, axis=0)
             # Compute gradients & update parameters on this batch
             params, opt_state, loss, new_inits = update(
                 params, opt_state, batch,
                 monotonicity_dict=_freeze_mono(monotonicity_dict),
-                h_sol_func=h_sol_func, h_an_func=h_an_func,
-                J_sol_sol_func=J_sol_sol_func, J_sol_an_func=J_sol_an_func,
-                J_an_an_func=J_an_an_func,
-                rescale_h_sol=rescale_h_sol, rescale_h_an=rescale_h_an,
-                rescale_J_sol_sol=rescale_J_sol_sol, rescale_J_sol_an=rescale_J_sol_an,
-                rescale_J_an_an=rescale_J_an_an, rescale_conc_factor=rescale_conc_factor,
+                h_sol_func=h_sol_func, h_anion_func=h_anion_func,
+                J_sol_sol_func=J_sol_sol_func, J_sol_anion_func=J_sol_anion_func,
+                J_anion_anion_func=J_anion_anion_func,
+                rescale_h_sol=rescale_h_sol, rescale_h_anion=rescale_h_anion,
+                rescale_J_sol_sol=rescale_J_sol_sol, rescale_J_sol_anion=rescale_J_sol_anion,
+                rescale_J_anion_anion=rescale_J_anion_anion, rescale_conc_factor=rescale_conc_factor,
             )
             init_guess_train = init_guess_train.at[batch_idx].set(new_inits)
             epoch_loss += loss
@@ -380,22 +391,22 @@ def train(params, num_epochs, train_data, test_data, val_data, opt_state,
         val_loss, _ = total_objective(
             params, val_data,
             monotonicity_dict=_freeze_mono(monotonicity_dict),
-            h_sol_func=h_sol_func, h_an_func=h_an_func,
-            J_sol_sol_func=J_sol_sol_func, J_sol_an_func=J_sol_an_func,
-            J_an_an_func=J_an_an_func,
-            rescale_h_sol=rescale_h_sol, rescale_h_an=rescale_h_an,
-            rescale_J_sol_sol=rescale_J_sol_sol, rescale_J_sol_an=rescale_J_sol_an,
-            rescale_J_an_an=rescale_J_an_an, rescale_conc_factor=rescale_conc_factor,
+            h_sol_func=h_sol_func, h_anion_func=h_anion_func,
+            J_sol_sol_func=J_sol_sol_func, J_sol_anion_func=J_sol_anion_func,
+            J_anion_anion_func=J_anion_anion_func,
+            rescale_h_sol=rescale_h_sol, rescale_h_anion=rescale_h_anion,
+            rescale_J_sol_sol=rescale_J_sol_sol, rescale_J_sol_anion=rescale_J_sol_anion,
+            rescale_J_anion_anion=rescale_J_anion_anion, rescale_conc_factor=rescale_conc_factor,
         )
         test_loss, _ = total_objective(
             params, test_data,
             monotonicity_dict=_freeze_mono(monotonicity_dict),
-            h_sol_func=h_sol_func, h_an_func=h_an_func,
-            J_sol_sol_func=J_sol_sol_func, J_sol_an_func=J_sol_an_func,
-            J_an_an_func=J_an_an_func,
-            rescale_h_sol=rescale_h_sol, rescale_h_an=rescale_h_an,
-            rescale_J_sol_sol=rescale_J_sol_sol, rescale_J_sol_an=rescale_J_sol_an,
-            rescale_J_an_an=rescale_J_an_an, rescale_conc_factor=rescale_conc_factor,
+            h_sol_func=h_sol_func, h_anion_func=h_anion_func,
+            J_sol_sol_func=J_sol_sol_func, J_sol_anion_func=J_sol_anion_func,
+            J_anion_anion_func=J_anion_anion_func,
+            rescale_h_sol=rescale_h_sol, rescale_h_anion=rescale_h_anion,
+            rescale_J_sol_sol=rescale_J_sol_sol, rescale_J_sol_anion=rescale_J_sol_anion,
+            rescale_J_anion_anion=rescale_J_anion_anion, rescale_conc_factor=rescale_conc_factor,
         )
         if epoch % 1 == 0:
             print(
@@ -439,24 +450,24 @@ def train(params, num_epochs, train_data, test_data, val_data, opt_state,
 def parity_results(
     data_dict, input_params, monotonicity_dict=DEFAULT_MONOTONICITY,
     h_sol_func=default_h_sol,
-    h_an_func=default_h_an,
+    h_anion_func=default_h_anion,
     J_sol_sol_func=default_J_sol_sol,
-    J_sol_an_func=default_J_sol_an,
-    J_an_an_func=default_J_an_an,
+    J_sol_anion_func=default_J_sol_anion,
+    J_anion_anion_func=default_J_anion_anion,
     rescale_h_sol=default_h_sol_rescale,
-    rescale_h_an=default_h_an_rescale,
+    rescale_h_anion=default_h_anion_rescale,
     rescale_J_sol_sol=default_J_sol_sol_rescale,
-    rescale_J_sol_an=default_J_sol_an_rescale,
-    rescale_J_an_an=default_J_an_an_rescale,
+    rescale_J_sol_anion=default_J_sol_anion_rescale,
+    rescale_J_anion_anion=default_J_anion_anion_rescale,
     rescale_conc_factor=default_conc_factor_rescale,
 ):
     """Evaluate trained parameters against each dataset split and produce parity plots.
 
     data_dict maps split names (e.g. "train", "val", "test") to data dicts with keys:
-        dn_sol, an_sol, x_sol, v_sol: shape (n, N)
-        dn_an, x_an, v_an:            shape (n, M)
-        z:                            shape (n,)
-        targets:                      shape (n, N+M)
+        sol_props:   dict with keys "dn","an","x","v" — shape (n, N) per key
+        anion_props: dict with keys "dn","x","v" — shape (n, M) per key
+        z:           shape (n,)
+        targets:     shape (n, N+M)
     The function stores per-species predictions as "pred_{i}" columns and computes
     RMSE and R² across all species. The CSV merging block below is left as a
     placeholder — update column names to match your specific data files.
@@ -464,28 +475,32 @@ def parity_results(
     for split_name in list(data_dict.keys()):
         data = data_dict[split_name]
         n = data["targets"].shape[0]
-        n_sol = data["dn_sol"].shape[1]
-        n_an = data["dn_an"].shape[1]
-        n_species = n_sol + n_an
+        sol_props_data   = data["sol_props"]
+        anion_props_data = data["anion_props"]
+        n_sol     = sol_props_data["dn"].shape[1]
+        n_anion   = anion_props_data["dn"].shape[1]
+        n_species = n_sol + n_anion
 
         # Per-row prediction via root solver
         preds = np.zeros((n, n_species))
         init_guess = jnp.ones(n_species) / n_species
         for i in range(n):
+            # Slice each leaf of the nested dicts for row i
+            sol_props_i   = {k: v[i] for k, v in sol_props_data.items()}
+            anion_props_i = {k: v[i] for k, v in anion_props_data.items()}
             occupations, _ = _find_root_impl(
                 input_params,
-                data["dn_sol"][i], data["an_sol"][i],
-                data["x_sol"][i], data["v_sol"][i],
-                data["dn_an"][i], data["x_an"][i], data["v_an"][i],
+                sol_props_i,
+                anion_props_i,
                 data["z"][i],
                 init_guess, max_tries=10,
                 monotonicity_dict=_freeze_mono(monotonicity_dict),
-                h_sol_func=h_sol_func, h_an_func=h_an_func,
-                J_sol_sol_func=J_sol_sol_func, J_sol_an_func=J_sol_an_func,
-                J_an_an_func=J_an_an_func,
-                rescale_h_sol=rescale_h_sol, rescale_h_an=rescale_h_an,
-                rescale_J_sol_sol=rescale_J_sol_sol, rescale_J_sol_an=rescale_J_sol_an,
-                rescale_J_an_an=rescale_J_an_an, rescale_conc_factor=rescale_conc_factor,
+                h_sol_func=h_sol_func, h_anion_func=h_anion_func,
+                J_sol_sol_func=J_sol_sol_func, J_sol_anion_func=J_sol_anion_func,
+                J_anion_anion_func=J_anion_anion_func,
+                rescale_h_sol=rescale_h_sol, rescale_h_anion=rescale_h_anion,
+                rescale_J_sol_sol=rescale_J_sol_sol, rescale_J_sol_anion=rescale_J_sol_anion,
+                rescale_J_anion_anion=rescale_J_anion_anion, rescale_conc_factor=rescale_conc_factor,
             )
             preds[i] = np.array(occupations)
 
@@ -494,12 +509,12 @@ def parity_results(
         # Build a flat dataframe with per-species columns
         df_dict = {}
         for s in range(n_sol):
-            df_dict[f"dn_sol_{s}"] = np.array(data["dn_sol"][:, s])
-            df_dict[f"an_sol_{s}"] = np.array(data["an_sol"][:, s])
-            df_dict[f"x_sol_{s}"]  = np.array(data["x_sol"][:, s])
-        for a in range(n_an):
-            df_dict[f"dn_an_{a}"]  = np.array(data["dn_an"][:, a])
-            df_dict[f"x_an_{a}"]   = np.array(data["x_an"][:, a])
+            df_dict[f"dn_sol_{s}"] = np.array(sol_props_data["dn"][:, s])
+            df_dict[f"an_sol_{s}"] = np.array(sol_props_data["an"][:, s])
+            df_dict[f"x_sol_{s}"]  = np.array(sol_props_data["x"][:, s])
+        for a in range(n_anion):
+            df_dict[f"dn_an_{a}"]  = np.array(anion_props_data["dn"][:, a])
+            df_dict[f"x_an_{a}"]   = np.array(anion_props_data["x"][:, a])
         for k in range(n_species):
             df_dict[f"target_{k}"] = targets[:, k]
             df_dict[f"pred_{k}"]   = preds[:, k]
@@ -515,12 +530,12 @@ def parity_results(
         loss, _ = total_objective(
             input_params, data_dict[split_name],
             monotonicity_dict=_freeze_mono(monotonicity_dict),
-            h_sol_func=h_sol_func, h_an_func=h_an_func,
-            J_sol_sol_func=J_sol_sol_func, J_sol_an_func=J_sol_an_func,
-            J_an_an_func=J_an_an_func,
-            rescale_h_sol=rescale_h_sol, rescale_h_an=rescale_h_an,
-            rescale_J_sol_sol=rescale_J_sol_sol, rescale_J_sol_an=rescale_J_sol_an,
-            rescale_J_an_an=rescale_J_an_an, rescale_conc_factor=rescale_conc_factor,
+            h_sol_func=h_sol_func, h_anion_func=h_anion_func,
+            J_sol_sol_func=J_sol_sol_func, J_sol_anion_func=J_sol_anion_func,
+            J_anion_anion_func=J_anion_anion_func,
+            rescale_h_sol=rescale_h_sol, rescale_h_anion=rescale_h_anion,
+            rescale_J_sol_sol=rescale_J_sol_sol, rescale_J_sol_anion=rescale_J_sol_anion,
+            rescale_J_anion_anion=rescale_J_anion_anion, rescale_conc_factor=rescale_conc_factor,
         )
         print(f"Loss on the {split_name} data: {loss:.4f}")
         print(f"RMSE on the {split_name} data: {rmse:.4f}")
@@ -530,7 +545,7 @@ def parity_results(
         df.to_csv(f"ising_results_{split_name}.csv", index=False)
 
         # Parity plot — one panel per species
-        labels = [f"Solvent {s}" for s in range(n_sol)] + [f"Anion {a}" for a in range(n_an)]
+        labels = [f"Solvent {s}" for s in range(n_sol)] + [f"Anion {a}" for a in range(n_anion)]
         markers = ["o", "x", "^", "s", "D", "v"]
         colors  = ["b", "orange", "g", "r", "purple", "brown"]
 

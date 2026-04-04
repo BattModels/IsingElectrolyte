@@ -8,8 +8,8 @@ import jax.numpy as jnp
 from functools import partial
 from ..model import _find_root_impl, energetics, DEFAULT_MONOTONICITY, _freeze_mono
 from ..interactions import (
-    default_h_sol_rescale, default_h_an_rescale,
-    default_J_sol_sol_rescale, default_J_sol_an_rescale, default_J_an_an_rescale,
+    default_h_sol_rescale, default_h_anion_rescale,
+    default_J_sol_sol_rescale, default_J_sol_anion_rescale, default_J_anion_anion_rescale,
     default_conc_factor_rescale,
 )
 from . import solvent_map_dict
@@ -18,10 +18,10 @@ from . import solvent_map_dict
 def frac_occupation(
     input_params, monotonicity_dict=DEFAULT_MONOTONICITY,
     rescale_h_sol=default_h_sol_rescale,
-    rescale_h_an=default_h_an_rescale,
+    rescale_h_anion=default_h_anion_rescale,
     rescale_J_sol_sol=default_J_sol_sol_rescale,
-    rescale_J_sol_an=default_J_sol_an_rescale,
-    rescale_J_an_an=default_J_an_an_rescale,
+    rescale_J_sol_anion=default_J_sol_anion_rescale,
+    rescale_J_anion_anion=default_J_anion_anion_rescale,
     rescale_conc_factor=default_conc_factor_rescale,
 ):
     """Fractional occupation of each species as a function of solvent 1 and solvent 2 DN.
@@ -50,20 +50,20 @@ def frac_occupation(
     init_guess   = jnp.array([1/3, 1/3, 1/3])
 
     def predict(d1, d2):
-        dn_sol = jnp.array([d1,      d2])
-        an_sol = jnp.array([an0,     an1])
-        x_sol  = jnp.array([x0,      x1])
-        v_sol  = jnp.array([v_sol0,  v_sol1])
-        dn_an  = jnp.array([dn_anion])
-        x_an   = jnp.array([x_anion])
-        v_an_  = jnp.array([v_an])
+        sol_props   = {"dn": jnp.array([d1,    d2]),
+                       "an": jnp.array([an0,   an1]),
+                       "x":  jnp.array([x0,    x1]),
+                       "v":  jnp.array([v_sol0, v_sol1])}
+        anion_props = {"dn": jnp.array([dn_anion]),
+                       "x":  jnp.array([x_anion]),
+                       "v":  jnp.array([v_an])}
         roots, _ = _find_root_impl(
-            input_params, dn_sol, an_sol, x_sol, v_sol, dn_an, x_an, v_an_, z,
+            input_params, sol_props, anion_props, z,
             init_guess, max_tries=10,
             monotonicity_dict=monotonicity_dict,
-            rescale_h_sol=rescale_h_sol, rescale_h_an=rescale_h_an,
-            rescale_J_sol_sol=rescale_J_sol_sol, rescale_J_sol_an=rescale_J_sol_an,
-            rescale_J_an_an=rescale_J_an_an, rescale_conc_factor=rescale_conc_factor,
+            rescale_h_sol=rescale_h_sol, rescale_h_anion=rescale_h_anion,
+            rescale_J_sol_sol=rescale_J_sol_sol, rescale_J_sol_anion=rescale_J_sol_anion,
+            rescale_J_anion_anion=rescale_J_anion_anion, rescale_conc_factor=rescale_conc_factor,
         )
         return roots
 
@@ -127,10 +127,10 @@ def frac_occupation(
 def occupations_dn2_an2_csv(
     trained_params, monotonicity_dict=DEFAULT_MONOTONICITY,
     rescale_h_sol=default_h_sol_rescale,
-    rescale_h_an=default_h_an_rescale,
+    rescale_h_anion=default_h_anion_rescale,
     rescale_J_sol_sol=default_J_sol_sol_rescale,
-    rescale_J_sol_an=default_J_sol_an_rescale,
-    rescale_J_an_an=default_J_an_an_rescale,
+    rescale_J_sol_anion=default_J_sol_anion_rescale,
+    rescale_J_anion_anion=default_J_anion_anion_rescale,
     rescale_conc_factor=default_conc_factor_rescale,
 ):
     """Occupation as a function of solvent 2 DN and AN; solvent 1 fixed to DME properties."""
@@ -152,20 +152,20 @@ def occupations_dn2_an2_csv(
     init_guess  = jnp.array([1/3, 1/3, 1/3])
 
     def predict(d1, a1):
-        dn_sol = jnp.array([dn0, d1])
-        an_sol = jnp.array([an0, a1])
-        x_sol  = jnp.array([x0,  x1])
-        v_sol  = jnp.array([v_sol0, v_sol1])
-        dn_an  = jnp.array([dn_anion])
-        x_an   = jnp.array([x_anion])
-        v_an_  = jnp.array([v_an])
+        sol_props   = {"dn": jnp.array([dn0, d1]),
+                       "an": jnp.array([an0, a1]),
+                       "x":  jnp.array([x0,  x1]),
+                       "v":  jnp.array([v_sol0, v_sol1])}
+        anion_props = {"dn": jnp.array([dn_anion]),
+                       "x":  jnp.array([x_anion]),
+                       "v":  jnp.array([v_an])}
         roots, _ = _find_root_impl(
-            trained_params, dn_sol, an_sol, x_sol, v_sol, dn_an, x_an, v_an_, z,
+            trained_params, sol_props, anion_props, z,
             init_guess, max_tries=10,
             monotonicity_dict=monotonicity_dict,
-            rescale_h_sol=rescale_h_sol, rescale_h_an=rescale_h_an,
-            rescale_J_sol_sol=rescale_J_sol_sol, rescale_J_sol_an=rescale_J_sol_an,
-            rescale_J_an_an=rescale_J_an_an, rescale_conc_factor=rescale_conc_factor,
+            rescale_h_sol=rescale_h_sol, rescale_h_anion=rescale_h_anion,
+            rescale_J_sol_sol=rescale_J_sol_sol, rescale_J_sol_anion=rescale_J_sol_anion,
+            rescale_J_anion_anion=rescale_J_anion_anion, rescale_conc_factor=rescale_conc_factor,
         )
         return roots
 
@@ -207,10 +207,10 @@ def occupations_dn2_an2_csv(
 def occupations_dn2_an2_contour(
     trained_params, monotonicity_dict=DEFAULT_MONOTONICITY,
     rescale_h_sol=default_h_sol_rescale,
-    rescale_h_an=default_h_an_rescale,
+    rescale_h_anion=default_h_anion_rescale,
     rescale_J_sol_sol=default_J_sol_sol_rescale,
-    rescale_J_sol_an=default_J_sol_an_rescale,
-    rescale_J_an_an=default_J_an_an_rescale,
+    rescale_J_sol_anion=default_J_sol_anion_rescale,
+    rescale_J_anion_anion=default_J_anion_anion_rescale,
     rescale_conc_factor=default_conc_factor_rescale,
 ):
     """Line plots of occupation vs. solvent 2 DN for several fixed AN values."""
@@ -233,20 +233,20 @@ def occupations_dn2_an2_contour(
         an1_flat = a1 * jnp.ones_like(dn1_flat)
 
         def predict(d1, a1_):
-            dn_sol = jnp.array([dn0, d1])
-            an_sol = jnp.array([an0, a1_])
-            x_sol  = jnp.array([x0,  x1])
-            v_sol  = jnp.array([v_sol0, v_sol1])
-            dn_an  = jnp.array([dn_anion])
-            x_an   = jnp.array([x_anion])
-            v_an_  = jnp.array([v_an])
+            sol_props   = {"dn": jnp.array([dn0, d1]),
+                           "an": jnp.array([an0, a1_]),
+                           "x":  jnp.array([x0,  x1]),
+                           "v":  jnp.array([v_sol0, v_sol1])}
+            anion_props = {"dn": jnp.array([dn_anion]),
+                           "x":  jnp.array([x_anion]),
+                           "v":  jnp.array([v_an])}
             roots, _ = _find_root_impl(
-                trained_params, dn_sol, an_sol, x_sol, v_sol, dn_an, x_an, v_an_, z,
+                trained_params, sol_props, anion_props, z,
                 init_guess, max_tries=10,
                 monotonicity_dict=monotonicity_dict,
-                rescale_h_sol=rescale_h_sol, rescale_h_an=rescale_h_an,
-                rescale_J_sol_sol=rescale_J_sol_sol, rescale_J_sol_an=rescale_J_sol_an,
-                rescale_J_an_an=rescale_J_an_an, rescale_conc_factor=rescale_conc_factor,
+                rescale_h_sol=rescale_h_sol, rescale_h_anion=rescale_h_anion,
+                rescale_J_sol_sol=rescale_J_sol_sol, rescale_J_sol_anion=rescale_J_sol_anion,
+                rescale_J_anion_anion=rescale_J_anion_anion, rescale_conc_factor=rescale_conc_factor,
             )
             return roots
 
@@ -269,10 +269,10 @@ def occupations_dn2_an2_contour(
 def visualize_li_free_energy_contour(
     trained_params, monotonicity_dict=DEFAULT_MONOTONICITY,
     rescale_h_sol=default_h_sol_rescale,
-    rescale_h_an=default_h_an_rescale,
+    rescale_h_anion=default_h_anion_rescale,
     rescale_J_sol_sol=default_J_sol_sol_rescale,
-    rescale_J_sol_an=default_J_sol_an_rescale,
-    rescale_J_an_an=default_J_an_an_rescale,
+    rescale_J_sol_anion=default_J_sol_anion_rescale,
+    rescale_J_anion_anion=default_J_anion_anion_rescale,
     rescale_conc_factor=default_conc_factor_rescale,
 ):
     """Li solvation free energy as a 2D contour over solvent 1 and solvent 2 DN."""
@@ -294,27 +294,27 @@ def visualize_li_free_energy_contour(
     init_guess = jnp.array([1/3, 1/3, 1/3])
 
     def predict(d1, d2):
-        dn_sol = jnp.array([d1,     d2])
-        an_sol = jnp.array([an0,    an1])
-        x_sol  = jnp.array([x0,     x1])
-        v_sol  = jnp.array([v_sol0, v_sol1])
-        dn_an  = jnp.array([dn_anion])
-        x_an   = jnp.array([x_anion])
-        v_an_  = jnp.array([v_an])
+        sol_props   = {"dn": jnp.array([d1,    d2]),
+                       "an": jnp.array([an0,   an1]),
+                       "x":  jnp.array([x0,    x1]),
+                       "v":  jnp.array([v_sol0, v_sol1])}
+        anion_props = {"dn": jnp.array([dn_anion]),
+                       "x":  jnp.array([x_anion]),
+                       "v":  jnp.array([v_an])}
         vars, _ = _find_root_impl(
-            trained_params, dn_sol, an_sol, x_sol, v_sol, dn_an, x_an, v_an_, z,
+            trained_params, sol_props, anion_props, z,
             init_guess, max_tries=10,
             monotonicity_dict=monotonicity_dict,
-            rescale_h_sol=rescale_h_sol, rescale_h_an=rescale_h_an,
-            rescale_J_sol_sol=rescale_J_sol_sol, rescale_J_sol_an=rescale_J_sol_an,
-            rescale_J_an_an=rescale_J_an_an, rescale_conc_factor=rescale_conc_factor,
+            rescale_h_sol=rescale_h_sol, rescale_h_anion=rescale_h_anion,
+            rescale_J_sol_sol=rescale_J_sol_sol, rescale_J_sol_anion=rescale_J_sol_anion,
+            rescale_J_anion_anion=rescale_J_anion_anion, rescale_conc_factor=rescale_conc_factor,
         )
         h, J, kT = energetics(
-            vars, trained_params, dn_sol, an_sol, x_sol, v_sol, dn_an, x_an, v_an_, z,
+            vars, trained_params, sol_props, anion_props, z,
             monotonicity_dict=monotonicity_dict,
-            rescale_h_sol=rescale_h_sol, rescale_h_an=rescale_h_an,
-            rescale_J_sol_sol=rescale_J_sol_sol, rescale_J_sol_an=rescale_J_sol_an,
-            rescale_J_an_an=rescale_J_an_an, rescale_conc_factor=rescale_conc_factor,
+            rescale_h_sol=rescale_h_sol, rescale_h_anion=rescale_h_anion,
+            rescale_J_sol_sol=rescale_J_sol_sol, rescale_J_sol_anion=rescale_J_sol_anion,
+            rescale_J_anion_anion=rescale_J_anion_anion, rescale_conc_factor=rescale_conc_factor,
         )
         return jnp.sum(h * z * vars)
 
@@ -337,10 +337,10 @@ def visualize_li_free_energy_contour(
 def visualize_li_free_energy_dn_an_contour(
     trained_params, monotonicity_dict=DEFAULT_MONOTONICITY,
     rescale_h_sol=default_h_sol_rescale,
-    rescale_h_an=default_h_an_rescale,
+    rescale_h_anion=default_h_anion_rescale,
     rescale_J_sol_sol=default_J_sol_sol_rescale,
-    rescale_J_sol_an=default_J_sol_an_rescale,
-    rescale_J_an_an=default_J_an_an_rescale,
+    rescale_J_sol_anion=default_J_sol_anion_rescale,
+    rescale_J_anion_anion=default_J_anion_anion_rescale,
     rescale_conc_factor=default_conc_factor_rescale,
 ):
     """Li solvation free energy as a 2D contour over solvent 2 DN and AN."""
@@ -362,27 +362,27 @@ def visualize_li_free_energy_dn_an_contour(
     init_guess = jnp.array([1/3, 1/3, 1/3])
 
     def predict(d1, a1):
-        dn_sol = jnp.array([dn0,    d1])
-        an_sol = jnp.array([an0,    a1])
-        x_sol  = jnp.array([x0,     x1])
-        v_sol  = jnp.array([v_sol0, v_sol1])
-        dn_an  = jnp.array([dn_anion])
-        x_an   = jnp.array([x_anion])
-        v_an_  = jnp.array([v_an])
+        sol_props   = {"dn": jnp.array([dn0,  d1]),
+                       "an": jnp.array([an0,  a1]),
+                       "x":  jnp.array([x0,   x1]),
+                       "v":  jnp.array([v_sol0, v_sol1])}
+        anion_props = {"dn": jnp.array([dn_anion]),
+                       "x":  jnp.array([x_anion]),
+                       "v":  jnp.array([v_an])}
         vars, _ = _find_root_impl(
-            trained_params, dn_sol, an_sol, x_sol, v_sol, dn_an, x_an, v_an_, z,
+            trained_params, sol_props, anion_props, z,
             init_guess, max_tries=10,
             monotonicity_dict=monotonicity_dict,
-            rescale_h_sol=rescale_h_sol, rescale_h_an=rescale_h_an,
-            rescale_J_sol_sol=rescale_J_sol_sol, rescale_J_sol_an=rescale_J_sol_an,
-            rescale_J_an_an=rescale_J_an_an, rescale_conc_factor=rescale_conc_factor,
+            rescale_h_sol=rescale_h_sol, rescale_h_anion=rescale_h_anion,
+            rescale_J_sol_sol=rescale_J_sol_sol, rescale_J_sol_anion=rescale_J_sol_anion,
+            rescale_J_anion_anion=rescale_J_anion_anion, rescale_conc_factor=rescale_conc_factor,
         )
         h, J, kT = energetics(
-            vars, trained_params, dn_sol, an_sol, x_sol, v_sol, dn_an, x_an, v_an_, z,
+            vars, trained_params, sol_props, anion_props, z,
             monotonicity_dict=monotonicity_dict,
-            rescale_h_sol=rescale_h_sol, rescale_h_an=rescale_h_an,
-            rescale_J_sol_sol=rescale_J_sol_sol, rescale_J_sol_an=rescale_J_sol_an,
-            rescale_J_an_an=rescale_J_an_an, rescale_conc_factor=rescale_conc_factor,
+            rescale_h_sol=rescale_h_sol, rescale_h_anion=rescale_h_anion,
+            rescale_J_sol_sol=rescale_J_sol_sol, rescale_J_sol_anion=rescale_J_sol_anion,
+            rescale_J_anion_anion=rescale_J_anion_anion, rescale_conc_factor=rescale_conc_factor,
         )
         return jnp.sum(h * z * vars)
 
