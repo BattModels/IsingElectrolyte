@@ -1,0 +1,20 @@
+# Ising LHCE training configuration
+# Run with: python examples/train_lhce.py examples/config.yaml
+
+# --- Data paths (relative to your working directory) ---
+train: data/train.csv
+val:   data/val.csv
+test:  data/test.csv
+
+# --- Training ---
+epochs:  1000
+trials:  10
+seed:    42
+
+# --- Output ---
+checkpoint: trained_params.pkl
+
+# --- Optimizer ---
+learning_rate:   0.01
+lr_decay_steps:  100
+lr_decay_rate:   0.99
