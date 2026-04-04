@@ -31,6 +31,19 @@ Config fields (YAML keys = long CLI flag names)
     j_sol_an_func   Name of J(sol-anion) function  (default: package default)
     j_an_an_func    Name of J(anion-anion) function(default: package default)
 
+    # Optional - rescale parameter function overrides (string names from IsingLHCE.interactions)
+    rescale_h_sol          Name of h(Li-sol) rescale function       (default: None)
+    rescale_h_an           Name of h(Li-anion) rescale function     (default: None)
+    rescale_J_sol_sol      Name of J(sol-sol) rescale function      (default: None)
+    rescale_J_sol_an       Name of J(sol-anion) rescale function    (default: None)
+    rescale_J_an_an        Name of J(anion-anion) rescale function  (default: None)
+    rescale_conc_factor    Name of concentration rescale function   (default: None)
+
+    # Optional - monotonicity constraint dict
+    monotonicity_dict      Dict mapping param keys to "increase"/"decrease".
+                           null/omitted → package DEFAULT_MONOTONICITY.
+                           {} → disable all constraints.
+
 Expected CSV columns
 --------------------
     Solvent DN, Diluent DN, Anion DN
@@ -59,6 +72,7 @@ from IsingLHCE.interactions import (
     default_h_sol, default_h_an,
     default_J_sol_sol, default_J_sol_an, default_J_an_an,
 )
+from IsingLHCE.model import DEFAULT_MONOTONICITY
 from IsingLHCE.train import initialize_params, train, parity_results
 
 
@@ -133,6 +147,38 @@ J_SOL_SOL_FUNC = None   # default: DN/AN cross + DN-DN + AN-AN,  16 params
 J_SOL_AN_FUNC  = None   # default: sol_sol_func(dn_an, an_sol),   6 params
 J_AN_AN_FUNC   = None   # default: sol_sol_func(dn_i, dn_j),      6 params
 
+# ---------------------------------------------------------------------------
+# CUSTOMIZATION — swap in your own rescale functions here (optional)
+# ---------------------------------------------------------------------------
+RESCALE_H_SOL     = None   # default: decrease with DN
+RESCALE_H_AN      = None   # default: decrease with DN
+RESCALE_J_SOL_SOL = None   # default: decrease with DN
+RESCALE_J_SOL_AN  = None   # default: decrease with DN
+RESCALE_J_AN_AN   = None   # default: increase with DN
+RESCALE_CONC_FACTOR = None # default: increase with concentration and volume
+
+# ---------------------------------------------------------------------------
+# CUSTOMIZATION — override the monotonicity constraint dict (optional)
+# ---------------------------------------------------------------------------
+# A dict mapping each parameter group to "increase" or "decrease".
+# None → use the package DEFAULT_MONOTONICITY (shown below).
+# {} (empty dict) → disable all monotonicity constraints.
+#
+# DEFAULT_MONOTONICITY = {
+#     "sol_params_dn":      "decrease",   # h(Li-sol) decreases with DN
+#     "salt_params_dn":     "decrease",   # h(Li-anion) decreases with DN
+#     "params_sol_salt_an": "decrease",   # J(sol-anion) decreases with DN/AN
+#     "params_sol_sol":     "decrease",   # J(sol-sol) decreases with DN/AN cross
+#     "params_anion_anion": "increase",   # J(anion-anion) increases with DN
+#     "conc_factor_sol":    "increase",   # concentration factor increases with x, V
+# }
+#
+# Example — flip anion-anion and leave the rest as package default:
+#   MONOTONICITY_DICT = {**DEFAULT_MONOTONICITY, "params_anion_anion": "decrease"}
+#
+# Can also be set from config.yaml under the 'monotonicity_dict' key
+# (script-level value takes priority).
+MONOTONICITY_DICT = None
 
 # ---------------------------------------------------------------------------
 # Coordination number — fixed for the standard DME/TTE/LiTFSI MD dataset
@@ -161,6 +207,16 @@ DEFAULTS = {
     "j_sol_sol_func":  None,
     "j_sol_an_func":   None,
     "j_an_an_func":    None,
+    # Optional rescale function overrides (string names from IsingLHCE.interactions)
+    "rescale_h_sol":      None,
+    "rescale_h_an":       None,
+    "rescale_J_sol_sol":  None,
+    "rescale_J_sol_an":   None,
+    "rescale_J_an_an":    None,
+    "rescale_conc_factor": None,
+    # Optional monotonicity constraint dict.
+    # None → use package DEFAULT_MONOTONICITY; {} → disable all constraints.
+    "monotonicity_dict": None,
     # Optional kwargs forwarded verbatim to initialize_params() each trial.
     # 'random_seed' is always computed per-trial and is silently ignored here.
     "initialize_params_kwargs": {},
@@ -199,6 +255,19 @@ def _load_config(argv):
                         help="Name of J(sol-anion) function in IsingLHCE.interactions")
     parser.add_argument("--j_an_an_func",   default=None,
                         help="Name of J(anion-anion) function in IsingLHCE.interactions")
+    # Rescale function overrides: string names looked up in IsingLHCE.interactions
+    parser.add_argument("--rescale_h_sol",      default=None,
+                        help="Name of h(Li-sol) rescale function in IsingLHCE.interactions")
+    parser.add_argument("--rescale_h_an",       default=None,
+                        help="Name of h(Li-anion) rescale function in IsingLHCE.interactions")
+    parser.add_argument("--rescale_J_sol_sol",  default=None,
+                        help="Name of J(sol-sol) rescale function in IsingLHCE.interactions")
+    parser.add_argument("--rescale_J_sol_an",   default=None,
+                        help="Name of J(sol-anion) rescale function in IsingLHCE.interactions")
+    parser.add_argument("--rescale_J_an_an",    default=None,
+                        help="Name of J(anion-anion) rescale function in IsingLHCE.interactions")
+    parser.add_argument("--rescale_conc_factor", default=None,
+                        help="Name of concentration factor rescale function in IsingLHCE.interactions")
 
     args = parser.parse_args(argv)
 
@@ -222,6 +291,11 @@ def _load_config(argv):
     # Normalise initialize_params_kwargs: YAML may produce None for an empty mapping
     if not cfg.get("initialize_params_kwargs"):
         cfg["initialize_params_kwargs"] = {}
+    # monotonicity_dict: keep None as None (→ package default at call site);
+    # only normalise if the YAML produced an explicit empty-mapping marker.
+    # An explicit {} in YAML stays {} (meaning: disable all constraints).
+    if "monotonicity_dict" not in cfg:
+        cfg["monotonicity_dict"] = None
 
     return cfg
 
@@ -295,6 +369,27 @@ def main(argv=None):
     j_sol_an_func  = _resolve_func(J_SOL_AN_FUNC  or cfg.get("j_sol_an_func"),  default_J_sol_an)
     j_an_an_func   = _resolve_func(J_AN_AN_FUNC   or cfg.get("j_an_an_func"),   default_J_an_an)
 
+    # -------------------------------------------------------------------
+    # Resolve rescale functions (optional)
+    # Script-level CUSTOMIZATION values take precedence over YAML/CLI strings.
+    # -------------------------------------------------------------------
+    rescale_h_sol      = _resolve_func(RESCALE_H_SOL      or cfg.get("rescale_h_sol"),      None)
+    rescale_h_an       = _resolve_func(RESCALE_H_AN       or cfg.get("rescale_h_an"),       None)
+    rescale_J_sol_sol     = _resolve_func(RESCALE_J_SOL_SOL  or cfg.get("rescale_J_sol_sol"),  None)
+    rescale_J_sol_an      = _resolve_func(RESCALE_J_SOL_AN   or cfg.get("rescale_J_sol_an"),   None)
+    rescale_J_an_an       = _resolve_func(RESCALE_J_AN_AN    or cfg.get("rescale_J_an_an"),    None)
+    rescale_conc_factor   = _resolve_func(RESCALE_CONC_FACTOR or cfg.get("rescale_conc_factor"), None)
+
+    # -------------------------------------------------------------------
+    # Resolve monotonicity dict
+    # Priority: script-level MONOTONICITY_DICT > YAML > package default
+    # None at any level → fall through to the next; final fallback is
+    # DEFAULT_MONOTONICITY (from IsingLHCE.model).
+    # {} means "disable all constraints" and is passed through as-is.
+    # -------------------------------------------------------------------
+    _mono_raw = MONOTONICITY_DICT if MONOTONICITY_DICT is not None else cfg["monotonicity_dict"]
+    monotonicity_dict = _mono_raw if _mono_raw is not None else DEFAULT_MONOTONICITY
+
     print("=== Ising LHCE Training ===")
     print(f"  train:    {cfg['train']}")
     print(f"  val:      {cfg['val']}")
@@ -307,9 +402,16 @@ def main(argv=None):
     print(f"  j_sol_sol_func: {j_sol_sol_func.__name__}")
     print(f"  j_sol_an_func:  {j_sol_an_func.__name__}")
     print(f"  j_an_an_func:   {j_an_an_func.__name__}")
+    print(f"  rescale_h_sol:      {rescale_h_sol.__name__ if rescale_h_sol else None}")
+    print(f"  rescale_h_an:       {rescale_h_an.__name__ if rescale_h_an else None}")
+    print(f"  rescale_J_sol_sol:  {rescale_J_sol_sol.__name__ if rescale_J_sol_sol else None}")
+    print(f"  rescale_J_sol_an:   {rescale_J_sol_an.__name__ if rescale_J_sol_an else None}")
+    print(f"  rescale_J_an_an:    {rescale_J_an_an.__name__ if rescale_J_an_an else None}")
+    print(f"  rescale_conc_factor: {rescale_conc_factor.__name__ if rescale_conc_factor else None}")
     _ip_kwargs_display = {k: v for k, v in cfg["initialize_params_kwargs"].items()
                           if k != "random_seed"}
     print(f"  initialize_params_kwargs: {_ip_kwargs_display}  (random_seed per trial)")
+    print(f"  monotonicity_dict: {monotonicity_dict}")
     print()
 
     # ------------------------------------------------------------------
@@ -350,15 +452,22 @@ def main(argv=None):
 
         t0 = time.time()
         params, train_log, val_log = train(
-            params,
+            params=params,
             num_epochs=cfg["epochs"],
             train_data=train_data,
             test_data=test_data,
             val_data=val_data,
             opt_state=opt_state,
+            monotonicity_dict=monotonicity_dict,
             h_sol_func=h_sol_func, h_an_func=h_an_func,
             J_sol_sol_func=j_sol_sol_func, J_sol_an_func=j_sol_an_func,
             J_an_an_func=j_an_an_func,
+            rescale_h_sol = rescale_h_sol,
+            rescale_h_an = rescale_h_an,
+            rescale_J_sol_sol = rescale_J_sol_sol,
+            rescale_J_sol_an = rescale_J_sol_an,
+            rescale_J_an_an = rescale_J_an_an,
+            rescale_conc_factor = rescale_conc_factor,
             random_seed=trial_seed,
         )
         elapsed = time.time() - t0
@@ -413,9 +522,16 @@ def main(argv=None):
     parity_results(
         {"train": train_data, "val": val_data, "test": test_data},
         best_params,
+        monotonicity_dict=monotonicity_dict,
         h_sol_func=h_sol_func, h_an_func=h_an_func,
         J_sol_sol_func=j_sol_sol_func, J_sol_an_func=j_sol_an_func,
         J_an_an_func=j_an_an_func,
+        rescale_h_sol=rescale_h_sol,
+        rescale_h_an=rescale_h_an,
+        rescale_J_sol_sol=rescale_J_sol_sol,
+        rescale_J_sol_an=rescale_J_sol_an,
+        rescale_J_an_an=rescale_J_an_an,
+        rescale_conc_factor=rescale_conc_factor,
     )
 
     # ------------------------------------------------------------------

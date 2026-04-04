@@ -30,6 +30,46 @@ lr_decay_rate:   0.99
 # j_sol_an_func:  null   # default: sol_sol_func(dn_an, an_sol),   6 params
 # j_an_an_func:   null   # default: sol_sol_func(dn_i, dn_j),      6 params
 
+# --- Optional rescale function overrides (string names from IsingLHCE.interactions) ---
+# These functions rescale the parameters through jnp.softplus to ensure desired monotonicity constraints
+rescale_h_sol:      default_h_sol_rescale  # default: decrease with DN
+rescale_h_an:       h_an_conc_step_rescale # default: decrease with DN
+rescale_J_sol_sol:  default_J_sol_sol_rescale # default: decrease with DN/AN
+rescale_J_sol_an:   default_J_sol_an_rescale # default: decrease with DN/AN
+rescale_J_an_an:    J_an_an_conc_step_rescale # default: increase with DN
+rescale_conc_factor: default_conc_factor_rescale # default: increase with concentration and volume
+
+# --- Monotonicity constraints (optional) ---
+# Controls the sign of softplus-rescaled parameters.
+# Omit this section (or set to null) to use the package DEFAULT_MONOTONICITY.
+# Set to {} to disable all monotonicity constraints.
+# Specify only the keys you want to override; unspecified keys are absent
+# from the dict (if you want full control, list all six).
+#
+# Allowed values per key: "increase" or "decrease"
+# Keys:
+#   sol_params_dn       h(Li-sol) field  (default: decrease with DN)
+#   salt_params_dn      h(Li-anion) field (default: decrease with DN)
+#   params_sol_salt_an  J(sol-anion)     (default: decrease with DN/AN)
+#   params_sol_sol      J(sol-sol)       (default: decrease with DN/AN)
+#   params_anion_anion  J(anion-anion)   (default: increase with DN)
+#   conc_factor_sol     concentration factor (default: increase with x, V)
+#
+# Example — use package defaults for everything:
+# monotonicity_dict: null
+#
+# Example — flip anion-anion direction only:
+# monotonicity_dict:
+#   sol_params_dn:      decrease
+#   salt_params_dn:     decrease
+#   params_sol_salt_an: decrease
+#   params_sol_sol:     decrease
+#   params_anion_anion: decrease
+#   conc_factor_sol:    increase
+#
+# Example — disable all monotonicity constraints:
+# monotonicity_dict: {}
+
 # --- Parameter initialization (optional) ---
 # Keys map directly to initialize_params() kwargs.
 # 'random_seed' is always computed per-trial and is ignored if set here.
