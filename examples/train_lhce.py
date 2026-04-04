@@ -69,8 +69,8 @@ import yaml
 import IsingLHCE.interactions as _interactions
 import IsingLHCE.train as ising_train
 from IsingLHCE.interactions import (
-    default_h_sol, default_h_an,
-    default_J_sol_sol, default_J_sol_an, default_J_an_an,
+    default_h_sol, default_h_anion,
+    default_J_sol_sol, default_J_sol_anion, default_J_anion_anion,
 )
 from IsingLHCE.model import DEFAULT_MONOTONICITY
 from IsingLHCE.train import initialize_params, train, parity_results
@@ -118,11 +118,14 @@ def _resolve_func(spec, default):
 # Each function must be JAX-traceable (use jax.numpy, not numpy).
 #
 # Signature contracts:
-#   h_sol_func     (dn_eff: scalar, x: scalar, params: array) -> scalar
-#   h_an_func      (dn_an:  scalar, x: scalar, params: array) -> scalar
-#   J_sol_sol_func (dn_i, an_i, x_i, dn_j, an_j, x_j, params) -> scalar
-#   J_sol_an_func  (dn_an, an_sol, x_sol, x_an, params) -> scalar
-#   J_an_an_func   (dn_i, x_i, dn_j, x_j, params) -> scalar
+#   h_sol_func           (props: dict, params: array) -> scalar
+#     props keys: 'dn' (dn_eff, conc-corrected), 'x', 'v', + any extras
+#   h_anion_func         (props: dict, params: array) -> scalar
+#     props keys: 'dn' (raw anion DN), 'x', 'v', + any extras
+#   J_sol_sol_func       (props_i: dict, props_j: dict, params: array) -> scalar
+#     props keys: 'dn' (dn_eff), 'an' (an_eff), 'x', + any extras
+#   J_sol_anion_func     (props_sol: dict, props_anion: dict, params: array) -> scalar
+#   J_anion_anion_func   (props_i: dict, props_j: dict, params: array) -> scalar
 #
 # Three ways to specify each slot:
 #   None       — use the package default (no change needed)
@@ -131,31 +134,31 @@ def _resolve_func(spec, default):
 #                (add it there, no import needed here; same name works in config.yaml)
 #
 # Examples:
-#   H_AN_FUNC = "my_new_h_an"            # define my_new_h_an in interactions.py
+#   H_ANION_FUNC = "my_new_h_anion"      # define my_new_h_anion in interactions.py
 #
 #   from IsingLHCE.interactions import langmuirfunc
-#   def my_h_sol(dn_eff, x, params): return langmuirfunc(dn_eff, params)
+#   def my_h_sol(props, params): return langmuirfunc(props["dn"], params)
 #   H_SOL_FUNC = my_h_sol
 #
 # NOTE: functions with different parameter array lengths than the defaults
 # require matching changes to initialize_params() or a compatible checkpoint.
-# Default parameter counts: h_sol/h_an=5, J_sol_sol=16, J_sol_an/J_an_an=6.
+# Default parameter counts: h_sol/h_anion=5, J_sol_sol=16, J_sol_anion/J_anion_anion=6.
 
-H_SOL_FUNC     = None   # default: expfunc(dn_eff) + logfunc(x),  5 params
-H_AN_FUNC      = None   # default: expfunc(dn_an)  + logfunc(x),  5 params
-J_SOL_SOL_FUNC = None   # default: DN/AN cross + DN-DN + AN-AN,  16 params
-J_SOL_AN_FUNC  = None   # default: sol_sol_func(dn_an, an_sol),   6 params
-J_AN_AN_FUNC   = None   # default: sol_sol_func(dn_i, dn_j),      6 params
+H_SOL_FUNC        = None   # default: expfunc(dn_eff) + logfunc(x),  5 params
+H_ANION_FUNC      = None   # default: expfunc(dn_an)  + logfunc(x),  5 params
+J_SOL_SOL_FUNC    = None   # default: DN/AN cross + DN-DN + AN-AN,  16 params
+J_SOL_ANION_FUNC  = None   # default: sol_sol_func(dn_an, an_sol),   6 params
+J_ANION_ANION_FUNC = None  # default: sol_sol_func(dn_i, dn_j),      6 params
 
 # ---------------------------------------------------------------------------
 # CUSTOMIZATION — swap in your own rescale functions here (optional)
 # ---------------------------------------------------------------------------
-RESCALE_H_SOL     = None   # default: decrease with DN
-RESCALE_H_AN      = None   # default: decrease with DN
-RESCALE_J_SOL_SOL = None   # default: decrease with DN
-RESCALE_J_SOL_AN  = None   # default: decrease with DN
-RESCALE_J_AN_AN   = None   # default: increase with DN
-RESCALE_CONC_FACTOR = None # default: increase with concentration and volume
+RESCALE_H_SOL        = None   # default: decrease with DN
+RESCALE_H_ANION      = None   # default: decrease with DN
+RESCALE_J_SOL_SOL    = None   # default: decrease with DN
+RESCALE_J_SOL_ANION  = None   # default: decrease with DN
+RESCALE_J_ANION_ANION = None  # default: increase with DN
+RESCALE_CONC_FACTOR  = None   # default: increase with concentration and volume
 
 # ---------------------------------------------------------------------------
 # CUSTOMIZATION — override the monotonicity constraint dict (optional)
@@ -212,24 +215,27 @@ DEFAULTS = {
     "lr_decay_steps":  100,
     "lr_decay_rate":   0.99,
     # Optional term-function overrides (string names from IsingLHCE.interactions)
-    "h_sol_func":      None,
-    "h_an_func":       None,
-    "j_sol_sol_func":  None,
-    "j_sol_an_func":   None,
-    "j_an_an_func":    None,
+    "h_sol_func":         None,
+    "h_anion_func":       None,
+    "j_sol_sol_func":     None,
+    "j_sol_anion_func":   None,
+    "j_anion_anion_func": None,
     # Optional rescale function overrides (string names from IsingLHCE.interactions)
-    "rescale_h_sol":      None,
-    "rescale_h_an":       None,
-    "rescale_J_sol_sol":  None,
-    "rescale_J_sol_an":   None,
-    "rescale_J_an_an":    None,
-    "rescale_conc_factor": None,
+    "rescale_h_sol":          None,
+    "rescale_h_anion":        None,
+    "rescale_J_sol_sol":      None,
+    "rescale_J_sol_anion":    None,
+    "rescale_J_anion_anion":  None,
+    "rescale_conc_factor":    None,
     # Optional monotonicity constraint dict.
     # None → use package DEFAULT_MONOTONICITY; {} → disable all constraints.
     "monotonicity_dict": None,
     # Optional kwargs forwarded verbatim to initialize_params() each trial.
     # 'random_seed' is always computed per-trial and is silently ignored here.
     "initialize_params_kwargs": {},
+    # Optional extra species columns to load from CSV
+    "extra_sol_columns":   None,
+    "extra_anion_columns": None,
 }
 
 
@@ -255,28 +261,28 @@ def _load_config(argv):
     parser.add_argument("--lr_decay_steps", type=int,   default=None)
     parser.add_argument("--lr_decay_rate",  type=float, default=None)
     # Term-function overrides: string names looked up in IsingLHCE.interactions
-    parser.add_argument("--h_sol_func",     default=None,
+    parser.add_argument("--h_sol_func",         default=None,
                         help="Name of h(Li-sol) function in IsingLHCE.interactions")
-    parser.add_argument("--h_an_func",      default=None,
+    parser.add_argument("--h_anion_func",        default=None,
                         help="Name of h(Li-anion) function in IsingLHCE.interactions")
-    parser.add_argument("--j_sol_sol_func", default=None,
+    parser.add_argument("--j_sol_sol_func",      default=None,
                         help="Name of J(sol-sol) function in IsingLHCE.interactions")
-    parser.add_argument("--j_sol_an_func",  default=None,
+    parser.add_argument("--j_sol_anion_func",    default=None,
                         help="Name of J(sol-anion) function in IsingLHCE.interactions")
-    parser.add_argument("--j_an_an_func",   default=None,
+    parser.add_argument("--j_anion_anion_func",  default=None,
                         help="Name of J(anion-anion) function in IsingLHCE.interactions")
     # Rescale function overrides: string names looked up in IsingLHCE.interactions
-    parser.add_argument("--rescale_h_sol",      default=None,
+    parser.add_argument("--rescale_h_sol",           default=None,
                         help="Name of h(Li-sol) rescale function in IsingLHCE.interactions")
-    parser.add_argument("--rescale_h_an",       default=None,
+    parser.add_argument("--rescale_h_anion",          default=None,
                         help="Name of h(Li-anion) rescale function in IsingLHCE.interactions")
-    parser.add_argument("--rescale_J_sol_sol",  default=None,
+    parser.add_argument("--rescale_J_sol_sol",        default=None,
                         help="Name of J(sol-sol) rescale function in IsingLHCE.interactions")
-    parser.add_argument("--rescale_J_sol_an",   default=None,
+    parser.add_argument("--rescale_J_sol_anion",      default=None,
                         help="Name of J(sol-anion) rescale function in IsingLHCE.interactions")
-    parser.add_argument("--rescale_J_an_an",    default=None,
+    parser.add_argument("--rescale_J_anion_anion",    default=None,
                         help="Name of J(anion-anion) rescale function in IsingLHCE.interactions")
-    parser.add_argument("--rescale_conc_factor", default=None,
+    parser.add_argument("--rescale_conc_factor",      default=None,
                         help="Name of concentration factor rescale function in IsingLHCE.interactions")
 
     args = parser.parse_args(argv)
@@ -306,6 +312,11 @@ def _load_config(argv):
     # An explicit {} in YAML stays {} (meaning: disable all constraints).
     if "monotonicity_dict" not in cfg:
         cfg["monotonicity_dict"] = None
+    # extra_*_columns: normalise None → empty dict
+    if not cfg.get("extra_sol_columns"):
+        cfg["extra_sol_columns"] = {}
+    if not cfg.get("extra_anion_columns"):
+        cfg["extra_anion_columns"] = {}
 
     return cfg
 
@@ -314,16 +325,23 @@ def _load_config(argv):
 # Data loading
 # ---------------------------------------------------------------------------
 
-def load_split(path):
+def load_split(path, extra_sol_columns=None, extra_anion_columns=None):
     """Load a CSV split and return a data dict for train.py.
 
-    The new API expects species properties as 2D arrays (n_samples × n_species).
+    The API expects species properties as nested dicts of 2D arrays (n_samples × n_species).
     For the standard 2-solvent + 1-anion system:
-        dn_sol, an_sol, x_sol, v_sol : shape (n, 2)
-        dn_an, x_an, v_an            : shape (n, 1)
-        targets                      : shape (n, 3)   [solvent, diluent, anion]
-        z                            : shape (n,)      fixed scalar broadcast
-        init_guess                   : shape (n, 3)    uniform 1/3
+        sol_props:   {"dn": (n,2), "an": (n,2), "x": (n,2), "v": (n,2)}
+        anion_props: {"dn": (n,1), "x": (n,1), "v": (n,1)}
+        targets:     shape (n, 3)   [solvent, diluent, anion]
+        z:           shape (n,)     fixed scalar broadcast
+        init_guess:  shape (n, 3)   uniform 1/3
+
+    Args:
+        path:               Path to CSV file.
+        extra_sol_columns:  Optional dict mapping property_name → list of CSV column names
+                            (one per solvent species in order) for extra descriptors.
+        extra_anion_columns: Optional dict mapping property_name → list of CSV column names
+                            (one per anion species in order) for extra descriptors.
     """
     df = pd.read_csv(path)
     n = len(df)
@@ -331,13 +349,22 @@ def load_split(path):
     def col(name):
         return jnp.array(df[name].values, dtype=jnp.float64)
 
-    dn_sol = jnp.stack([col("Solvent DN"),            col("Diluent DN")],           axis=1)
-    an_sol = jnp.stack([col("Solvent AN"),            col("Diluent AN")],           axis=1)
-    x_sol  = jnp.stack([col("solvent molar ratio"),   col("diluent molar ratio")],  axis=1)
-    v_sol  = jnp.stack([col("solvent volume"),        col("diluent volume")],       axis=1)
-    dn_an  = col("Anion DN")[:, None]
-    x_an   = col("anion molar ratio")[:, None]
-    v_an   = col("anion volume")[:, None]
+    sol_props = {
+        "dn": jnp.stack([col("Solvent DN"),          col("Diluent DN")],          axis=1),
+        "an": jnp.stack([col("Solvent AN"),          col("Diluent AN")],          axis=1),
+        "x":  jnp.stack([col("solvent molar ratio"), col("diluent molar ratio")], axis=1),
+        "v":  jnp.stack([col("solvent volume"),      col("diluent volume")],      axis=1),
+    }
+    for prop_name, csv_cols in (extra_sol_columns or {}).items():
+        sol_props[prop_name] = jnp.stack([col(c) for c in csv_cols], axis=1)
+
+    anion_props = {
+        "dn": col("Anion DN")[:, None],
+        "x":  col("anion molar ratio")[:, None],
+        "v":  col("anion volume")[:, None],
+    }
+    for prop_name, csv_cols in (extra_anion_columns or {}).items():
+        anion_props[prop_name] = jnp.stack([col(c) for c in csv_cols], axis=1)
 
     targets = jnp.stack([
         col("Fractional CN solvent"),
@@ -349,16 +376,11 @@ def load_split(path):
     init_guess = jnp.full((n, 3), 1.0 / 3.0, dtype=jnp.float64)
 
     return {
-        "dn_sol":     dn_sol,
-        "an_sol":     an_sol,
-        "x_sol":      x_sol,
-        "v_sol":      v_sol,
-        "dn_an":      dn_an,
-        "x_an":       x_an,
-        "v_an":       v_an,
-        "z":          z,
-        "targets":    targets,
-        "init_guess": init_guess,
+        "sol_props":   sol_props,
+        "anion_props": anion_props,
+        "z":           z,
+        "targets":     targets,
+        "init_guess":  init_guess,
     }
 
 
