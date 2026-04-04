@@ -30,15 +30,23 @@ jax.config.update("jax_disable_jit", False)
 #:   "decrease" — the interaction strength decreases as the descriptor increases
 #:   "increase" — the interaction strength increases as the descriptor increases
 #:   "none"     — no monotonicity constraint; parameters are left unconstrained
+# Example:
+# DEFAULT_MONOTONICITY = {
+#     "sol_params_dn":      "decrease",   # h(Li-sol) decreases with DN
+#     "salt_params_dn":     "decrease",   # h(Li-anion) decreases with DN
+#     "params_sol_salt_an": "decrease",   # J(sol-anion) decreases with DN/AN
+#     "params_sol_sol":     "decrease",   # J(sol-sol) decreases with DN/AN cross
+#     "params_anion_anion": "increase",   # J(anion-anion) increases with DN
+#     "conc_factor_sol":    "increase",   # concentration factor increases with x, V
+# }
 DEFAULT_MONOTONICITY = {
-    "sol_params_dn":      "decrease",   # h(Li-sol) decreases with DN
-    "salt_params_dn":     "decrease",   # h(Li-anion) decreases with DN
-    "params_sol_salt_an": "decrease",   # J(sol-anion) decreases with DN/AN
-    "params_sol_sol":     "decrease",   # J(sol-sol) decreases with DN/AN cross
-    "params_anion_anion": "increase",   # J(anion-anion) increases with DN
-    "conc_factor_sol":    "increase",   # concentration factor increases with x, V
+    "sol_params_dn":      "none",       # no constraint
+    "salt_params_dn":     "none",       # no constraint
+    "params_sol_salt_an": "none",       # no constraint
+    "params_sol_sol":     "none",       # no constraint
+    "params_anion_anion": "none",       # no constraint
+    "conc_factor_sol":    "none",       # no constraint
 }
-
 
 def _freeze_mono(d):
     """Convert a monotonicity dict to a hashable frozenset for JAX static args.
