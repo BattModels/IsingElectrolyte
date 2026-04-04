@@ -41,8 +41,9 @@ rescale_conc_factor: default_conc_factor_rescale # default: increase with concen
 
 # --- Monotonicity constraints (optional) ---
 # Controls the sign of softplus-rescaled parameters.
-# Omit this section (or set to null) to use the package DEFAULT_MONOTONICITY.
-# Set to {} to disable all monotonicity constraints.
+# Omit this section (or set to null) to use the package DEFAULT_MONOTONICITY
+# (currently all "none" — no constraints applied by default).
+# Set individual keys to "decrease", "increase", or "none".
 # Specify only the keys you want to override; unspecified keys are absent
 # from the dict (if you want full control, list all six).
 #

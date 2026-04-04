@@ -165,16 +165,26 @@ RESCALE_CONC_FACTOR = None # default: increase with concentration and volume
 # {} (empty dict) → disable all monotonicity constraints.
 #
 # DEFAULT_MONOTONICITY = {
-#     "sol_params_dn":      "decrease",   # h(Li-sol) decreases with DN
-#     "salt_params_dn":     "decrease",   # h(Li-anion) decreases with DN
-#     "params_sol_salt_an": "decrease",   # J(sol-anion) decreases with DN/AN
-#     "params_sol_sol":     "decrease",   # J(sol-sol) decreases with DN/AN cross
-#     "params_anion_anion": "increase",   # J(anion-anion) increases with DN
-#     "conc_factor_sol":    "increase",   # concentration factor increases with x, V
+#     "sol_params_dn":      "none",   # no constraint
+#     "salt_params_dn":     "none",   # no constraint
+#     "params_sol_salt_an": "none",   # no constraint
+#     "params_sol_sol":     "none",   # no constraint
+#     "params_anion_anion": "none",   # no constraint
+#     "conc_factor_sol":    "none",   # no constraint
 # }
 #
-# Example — flip anion-anion and leave the rest as package default:
-#   MONOTONICITY_DICT = {**DEFAULT_MONOTONICITY, "params_anion_anion": "decrease"}
+# Example — enforce physically motivated constraints on all terms:
+#   MONOTONICITY_DICT = {
+#       "sol_params_dn":      "decrease",
+#       "salt_params_dn":     "decrease",
+#       "params_sol_salt_an": "decrease",
+#       "params_sol_sol":     "decrease",
+#       "params_anion_anion": "increase",
+#       "conc_factor_sol":    "increase",
+#   }
+#
+# Example — enforce constraints on some terms only:
+#   MONOTONICITY_DICT = {**DEFAULT_MONOTONICITY, "sol_params_dn": "decrease"}
 #
 # Can also be set from config.yaml under the 'monotonicity_dict' key
 # (script-level value takes priority).
