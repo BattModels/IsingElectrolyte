@@ -1,0 +1,60 @@
+# Ising LHCE training configuration — dielectric-constant experiment
+# Run with: python examples/train_lhce.py examples/config_dielectric.yaml
+#
+# Uses h_anion_conc_step and J_anion_anion_conc_step, which gate the
+# dielectric-screened Coulombic term on/off via a concentration step function.
+# The effective dielectric constant (epsilon) is loaded as an extra anion
+# descriptor; see extra_anion_columns below.
+
+# --- Data paths (relative to your working directory) ---
+train: data/train.csv
+val:   data/val.csv
+test:  data/test.csv
+
+# --- Training ---
+epochs:  1000
+trials:  10
+seed:    42
+
+# --- Output ---
+checkpoint: trained_params_dielectric.pkl
+
+# --- Optimizer ---
+learning_rate:   0.01
+lr_decay_steps:  100
+lr_decay_rate:   0.99
+
+# --- Term-function overrides ---
+# h_sol and J_sol_* keep defaults; only anion terms are changed.
+h_anion_func:        h_anion_conc_step        # 11 params (vs. default 5)
+j_anion_anion_func:  J_anion_anion_conc_step  # 13 params (vs. default 6)
+
+# --- Rescale function overrides ---
+rescale_h_sol:           default_h_sol_rescale
+rescale_h_anion:         h_anion_conc_step_rescale
+rescale_J_sol_sol:       default_J_sol_sol_rescale
+rescale_J_sol_anion:     default_J_sol_anion_rescale
+rescale_J_anion_anion:   J_anion_anion_conc_step_rescale
+rescale_conc_factor:     default_conc_factor_rescale
+
+# --- Monotonicity constraints ---
+# null → use package DEFAULT_MONOTONICITY (all "none" — no constraints).
+monotonicity_dict: null
+
+# --- Extra per-species descriptors ---
+# The effective dielectric constant seen by the anion is computed outside
+# this config (e.g. as a mole-fraction-weighted average of "Solvent Epsilon"
+# and "Diluent Epsilon") and stored as a dedicated CSV column.
+# train_dielectric.py computes this automatically; if using train_lhce.py
+# directly, pre-compute the column and add it to your CSV files.
+extra_anion_columns:
+  epsilon:
+    - "Anion Epsilon"   # mole-fraction-weighted average of Solvent/Diluent Epsilon
+
+# --- Parameter initialization ---
+# Non-default sizes required by the two new term functions.
+initialize_params_kwargs:
+  mode: from_scratch
+  param_sizes:
+    salt_params_dn:     11   # h_anion_conc_step  (default: 5)
+    params_anion_anion: 13   # J_anion_anion_conc_step (default: 6)
