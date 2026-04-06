@@ -367,11 +367,13 @@ def J_anion_anion_conc_step(props_i, props_j, params):
     interaction is dielectric-screened (J1); at high concentration the bare
     DN–DN term dominates (J2).  The combined molar ratio x_i + x_j controls
     the step gate.  The effective dielectric is the average of the two anions'
-    environments (identical when only one anion species is present).
+    environments, weighted by their molar fractions.
 
-      J = s(x_i+x_j) * J1(dn_i, dn_j, ε_avg)
+      J = s(x_i+x_j) * J1(dn_i, dn_j, ε_eff)
         + (1 − s(x_i+x_j)) * J2(dn_i, dn_j)
         + logfunc(x_i) + logfunc(x_j)
+
+    where ε_eff = x_i·ε_i + x_j·ε_j  (mole-fraction-weighted dielectric).
 
     props_i, props_j: scalar dicts with keys 'dn', 'x', 'epsilon'.
     params: params_anion_anion (13 elements)
@@ -382,9 +384,9 @@ def J_anion_anion_conc_step(props_i, props_j, params):
     """
     dn_i, x_i, epsilon_i = props_i["dn"], props_i["x"], props_i["epsilon"]
     dn_j, x_j, epsilon_j = props_j["dn"], props_j["x"], props_j["epsilon"]
-    epsilon_avg = (epsilon_i + epsilon_j) / 2.0
+    epsilon_eff = x_i * epsilon_i + x_j * epsilon_j
     step_ij = conc_step_function(x_i + x_j, params[:2])
-    J1 = sol_sol_func(jnp.array([dn_i, dn_j]), params[2:7]) / epsilon_avg
+    J1 = sol_sol_func(jnp.array([dn_i, dn_j]), params[2:7]) / epsilon_eff
     J2 = sol_sol_func(jnp.array([dn_i, dn_j]), params[7:12])
     return step_ij * J1 + (1 - step_ij) * J2 + logfunc(x_i, params[12]) + logfunc(x_j, params[12])
 
