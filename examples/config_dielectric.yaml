@@ -42,14 +42,17 @@ rescale_conc_factor:     default_conc_factor_rescale
 monotonicity_dict: null
 
 # --- Extra per-species descriptors ---
-# The effective dielectric constant seen by the anion is computed outside
-# this config (e.g. as a mole-fraction-weighted average of "Solvent Epsilon"
-# and "Diluent Epsilon") and stored as a dedicated CSV column.
-# train_dielectric.py computes this automatically; if using train_lhce.py
-# directly, pre-compute the column and add it to your CSV files.
-extra_anion_columns:
-  epsilon:
-    - "Anion Epsilon"   # mole-fraction-weighted average of Solvent/Diluent Epsilon
+# NOTE: this section is only used when running train_lhce.py with this config.
+# train_dielectric.py has its own load_split() that computes epsilon directly
+# from "Solvent Epsilon" and "Diluent Epsilon" — no extra CSV column needed.
+#
+# If using train_lhce.py instead, pre-compute the mole-fraction-weighted
+# average of Solvent/Diluent Epsilon and save it as "Anion Epsilon" in your
+# CSV files, then uncomment the lines below:
+#
+# extra_anion_columns:
+#   epsilon:
+#     - "Anion Epsilon"
 
 # --- Parameter initialization ---
 # Non-default sizes required by the two new term functions.
