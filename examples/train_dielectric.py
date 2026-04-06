@@ -81,6 +81,21 @@ RESCALE_CONC_FACTOR    = default_conc_factor_rescale
 MONOTONICITY_DICT = None
 
 # ---------------------------------------------------------------------------
+# CUSTOMIZATION — parameter initialization
+# ---------------------------------------------------------------------------
+# Passed directly to initialize_params(). random_seed is always set per-trial.
+# param_sizes must match the term functions above:
+#   salt_params_dn     = 11  for h_anion_conc_step      (default: 5)
+#   params_anion_anion = 13  for J_anion_anion_conc_step (default: 6)
+INITIALIZE_PARAMS_KWARGS = {
+    "mode": "from_scratch",
+    "param_sizes": {
+        "salt_params_dn":     11,
+        "params_anion_anion": 13,
+    },
+}
+
+# ---------------------------------------------------------------------------
 # Training hyperparameters
 # ---------------------------------------------------------------------------
 TRAIN_PATH    = "data/train.csv"
@@ -205,15 +220,9 @@ def main():
         trial_seed = BASE_SEED + trial * 10
         print(f"\n--- Trial {trial + 1}/{TRIALS}  (seed={trial_seed}) ---")
 
-        # Non-default param sizes for the two new term functions
-        params = initialize_params(
-            mode="from_scratch",
-            random_seed=trial_seed,
-            param_sizes={
-                "salt_params_dn":     11,   # h_anion_conc_step
-                "params_anion_anion": 13,   # J_anion_anion_conc_step
-            },
-        )
+        ip_kwargs = dict(INITIALIZE_PARAMS_KWARGS)
+        ip_kwargs["random_seed"] = trial_seed
+        params = initialize_params(**ip_kwargs)
 
         schedule  = optax.exponential_decay(LR, LR_DECAY_STEPS, LR_DECAY_RATE)
         optimizer = optax.adam(schedule)
