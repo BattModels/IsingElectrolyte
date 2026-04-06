@@ -310,71 +310,124 @@ def default_conc_factor_rescale(params, monotonicity):
     return _apply_softplus(params, signs)
 
 # ---------------------------------------------------------------------------
-# h and J functions accounting for dielectric constant using a step function based on concentration
-# Only considering Li-anion interaction and anion-anion interaction as they are both dominated by coulombic interactions and thus more likely to be affected by dielectric constant change.
+# h and J functions accounting for dielectric constant using a step function
+# based on concentration.  Only Li-anion and anion-anion interactions are
+# modified — both are dominated by Coulombic forces and therefore most
+# sensitive to changes in the local dielectric environment.
+#
+# These functions expect an extra "epsilon" key in the anion props dict.
+# Load it from the CSV via extra_anion_columns in load_split / config.yaml.
 # ---------------------------------------------------------------------------
+
 @jax.jit
 def conc_step_function(x, params):
-    """
-    Step function dependent on molar ratio for turning on/off certain interactions.
+    """Sigmoid step function of molar ratio used to smoothly gate interactions.
+
+    Returns values in (0, 1): ≈1 at low x (dilute, Coulombic-dominated regime)
+    and ≈0 at high x (concentrated regime).
+
+    params: [x0, k]  — inflection point and steepness.
     """
     x0, k = params
-    output = 1 / (1 + jnp.exp(k * (x - x0)))
-    return output
+    return 1.0 / (1.0 + jnp.exp(k * (x - x0)))
 
-@jax.jit
-def h_an_conc_step(props, params):
+
+def h_anion_conc_step(props, params):
+    """Li-anion h term with concentration-gated dielectric-constant dependence.
+
+    At low anion concentration (dilute limit) the interaction is screened by
+    the dielectric constant (Coulombic regime, h1); at high concentration the
+    Coulombic screening saturates and the bare DN-dependent term dominates (h2).
+
+      h = s(x) * h1(dn, ε) + (1 − s(x)) * h2(dn) + logfunc(x)
+
+    where s(x) = conc_step_function(x, params[:2]).
+
+    props: scalar dict with keys
+      'dn'      — raw anion DN (not concentration-corrected)
+      'x'       — anion molar ratio
+      'epsilon' — effective dielectric constant of the anion environment
+    params: salt_params_dn (11 elements)
+      [:2]    conc_step_function (x0, k)
+      [2:6]   expfunc for h1 (dielectric-screened term)
+      [6:10]  expfunc for h2 (unscreened term)
+      [10]    logfunc concentration term
     """
-    Li-anion h term in the functional form of:
-    h = step_function(x, params) * h1 + (1-step_function(x, params)) * h2
-    h1 is dielectric constant dependent, and h2 is the non-dielectric constant dependent term.
-    """
-    x, dn_eff, epsilon_eff = props["x"], props["dn"], props["epsilon"]
+    dn, x, epsilon = props["dn"], props["x"], props["epsilon"]
     step = conc_step_function(x, params[:2])
-    h1 = expfunc(dn_eff, params[2:6]) / epsilon_eff
-    h2 = expfunc(dn_eff, params[6:10]) 
-    output = step * h1 + (1 - step) * h2 + logfunc(x, params[10])
-    return output
+    h1 = expfunc(dn, params[2:6]) / epsilon
+    h2 = expfunc(dn, params[6:10])
+    return step * h1 + (1 - step) * h2 + logfunc(x, params[10])
 
-@jax.jit
-def J_an_an_conc_step(props_i, props_j, params):
+
+def J_anion_anion_conc_step(props_i, props_j, params):
+    """Anion-anion J term with concentration-gated dielectric-constant dependence.
+
+    Analogous to h_anion_conc_step: at low total anion concentration the
+    interaction is dielectric-screened (J1); at high concentration the bare
+    DN–DN term dominates (J2).  The combined molar ratio x_i + x_j controls
+    the step gate.  The effective dielectric is the average of the two anions'
+    environments (identical when only one anion species is present).
+
+      J = s(x_i+x_j) * J1(dn_i, dn_j, ε_avg)
+        + (1 − s(x_i+x_j)) * J2(dn_i, dn_j)
+        + logfunc(x_i) + logfunc(x_j)
+
+    props_i, props_j: scalar dicts with keys 'dn', 'x', 'epsilon'.
+    params: params_anion_anion (13 elements)
+      [:2]    conc_step_function (x0, k)
+      [2:7]   sol_sol_func for J1 (dielectric-screened term)
+      [7:12]  sol_sol_func for J2 (unscreened term)
+      [12]    logfunc concentration term
     """
-    Anion-anion J term in the functional form of:
-    J = step_function(x_i, params) * step_function(x_j, params) * J1 + (1-step_function(x_i, params) * step_function(x_j, params)) * J2
-    J1 is dielectric constant dependent, and J2 is the non-dielectric constant dependent term.
-    """
-    x_i, dn_i, epsilon_i = props_i["x"], props_i["dn"], props_i["epsilon"]
-    x_j, dn_j, epsilon_j = props_j["x"], props_j["dn"], props_j["epsilon"]
+    dn_i, x_i, epsilon_i = props_i["dn"], props_i["x"], props_i["epsilon"]
+    dn_j, x_j, epsilon_j = props_j["dn"], props_j["x"], props_j["epsilon"]
+    epsilon_avg = (epsilon_i + epsilon_j) / 2.0
     step_ij = conc_step_function(x_i + x_j, params[:2])
-    J1 = sol_sol_func(jnp.array([dn_i, dn_j]), params[2:7]) / epsilon_eff
-    J2 = sol_sol_func(jnp.array([dn_i, dn_j]), params[7:12]) 
-    output = step_ij * J1 + (1 - step_ij) * J2 + logfunc(x_i, params[12]) + logfunc(x_j, params[12])
-    return output
+    J1 = sol_sol_func(jnp.array([dn_i, dn_j]), params[2:7]) / epsilon_avg
+    J2 = sol_sol_func(jnp.array([dn_i, dn_j]), params[7:12])
+    return step_ij * J1 + (1 - step_ij) * J2 + logfunc(x_i, params[12]) + logfunc(x_j, params[12])
 
-def h_an_conc_step_rescale(params, monotonicity):
-    """Rescaling for h_an_conc_step — 11 params: step_function[2] + expfunc1[4] + expfunc2[4] + logfunc[1].
 
-    "decrease": h decreases with DN and x.
-    "increase": h increases with DN and x.
+# Backwards-compatible aliases (old _an names)
+h_an_conc_step           = h_anion_conc_step
+J_an_an_conc_step        = J_anion_anion_conc_step
+
+
+def h_anion_conc_step_rescale(params, monotonicity):
+    """Rescaling for h_anion_conc_step — 11 params.
+
+    Layout: step[:2] + expfunc1[2:6] + expfunc2[6:10] + logfunc[10].
+    "decrease": h decreases with DN (a3 of both expfuncs forced negative).
+    "increase": h increases with DN (a3 of both expfuncs forced positive).
+    "none":     no constraint applied.
     """
     if monotonicity == "decrease":
-        signs = jnp.array([ 0, 0, 0, +1, +1, -1, 0, +1, +1, -1, -1])
+        signs = jnp.array([ 0,  0,  0, +1, +1, -1,  0, +1, +1, -1, -1])
     elif monotonicity == "increase":
-        signs = jnp.array([ 0, 0, 0, +1, +1, +1, 0, +1, +1, +1, -1])
+        signs = jnp.array([ 0,  0,  0, +1, +1, +1,  0, +1, +1, +1, -1])
     else:
         signs = jnp.zeros(11, dtype=int)
     return _apply_softplus(params, signs)
 
-def J_an_an_conc_step_rescale(params, monotonicity):
-    """Rescaling for J_an_an_conc_step — 13 params: step_function[2] + sol_sol_func1[5] + sol_sol_func2[5] + logfunc[1].
 
-    "increase": J increases with DN and x (default physics for anion-anion).
-    "decrease": J decreases with DN and x.
+def J_anion_anion_conc_step_rescale(params, monotonicity):
+    """Rescaling for J_anion_anion_conc_step — 13 params.
+
+    Layout: step[:2] + sol_sol_func1[2:7] + sol_sol_func2[7:12] + logfunc[12].
+    "increase": J increases with DN (default physics for anion-anion).
+    "decrease": J decreases with DN.
+    "none":     no constraint applied.
     """
     if monotonicity == "increase":
-        signs = jnp.array([ 0, 0, 0, +1, 0, -1, -1, 0, +1, 0, -1, -1, -1])
+        signs = jnp.array([ 0,  0,  0, +1,  0, -1, -1,  0, +1,  0, -1, -1, -1])
     elif monotonicity == "decrease":
-        signs = jnp.array([ 0, 0, 0, +1, 0, +1, +1, 0, +1, 0, +1, +1, -1])
+        signs = jnp.array([ 0,  0,  0, +1,  0, +1, +1,  0, +1,  0, +1, +1, -1])
     else:
         signs = jnp.zeros(13, dtype=int)
-    return _apply_softplus(params, signs)    
+    return _apply_softplus(params, signs)
+
+
+# Backwards-compatible aliases (old _an names)
+h_an_conc_step_rescale      = h_anion_conc_step_rescale
+J_an_an_conc_step_rescale   = J_anion_anion_conc_step_rescale
