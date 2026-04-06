@@ -308,3 +308,73 @@ def default_conc_factor_rescale(params, monotonicity):
     else:
         signs = jnp.zeros(8, dtype=int)
     return _apply_softplus(params, signs)
+
+# ---------------------------------------------------------------------------
+# h and J functions accounting for dielectric constant using a step function based on concentration
+# Only considering Li-anion interaction and anion-anion interaction as they are both dominated by coulombic interactions and thus more likely to be affected by dielectric constant change.
+# ---------------------------------------------------------------------------
+@jax.jit
+def conc_step_function(x, params):
+    """
+    Step function dependent on molar ratio for turning on/off certain interactions.
+    """
+    x0, k = params
+    output = 1 / (1 + jnp.exp(k * (x - x0)))
+    return output
+
+@jax.jit
+def h_an_conc_step(props, params):
+    """
+    Li-anion h term in the functional form of:
+    h = step_function(x, params) * h1 + (1-step_function(x, params)) * h2
+    h1 is dielectric constant dependent, and h2 is the non-dielectric constant dependent term.
+    """
+    x, dn_eff, epsilon_eff = props["x"], props["dn"], props["epsilon"]
+    step = conc_step_function(x, params[:2])
+    h1 = expfunc(dn_eff, params[2:6]) / epsilon_eff
+    h2 = expfunc(dn_eff, params[6:10]) 
+    output = step * h1 + (1 - step) * h2 + logfunc(x, params[10])
+    return output
+
+@jax.jit
+def J_an_an_conc_step(props_i, props_j, params):
+    """
+    Anion-anion J term in the functional form of:
+    J = step_function(x_i, params) * step_function(x_j, params) * J1 + (1-step_function(x_i, params) * step_function(x_j, params)) * J2
+    J1 is dielectric constant dependent, and J2 is the non-dielectric constant dependent term.
+    """
+    x_i, dn_i, epsilon_i = props_i["x"], props_i["dn"], props_i["epsilon"]
+    x_j, dn_j, epsilon_j = props_j["x"], props_j["dn"], props_j["epsilon"]
+    step_ij = conc_step_function(x_i + x_j, params[:2])
+    J1 = sol_sol_func(jnp.array([dn_i, dn_j]), params[2:7]) / epsilon_eff
+    J2 = sol_sol_func(jnp.array([dn_i, dn_j]), params[7:12]) 
+    output = step_ij * J1 + (1 - step_ij) * J2 + logfunc(x_i, params[12]) + logfunc(x_j, params[12])
+    return output
+
+def h_an_conc_step_rescale(params, monotonicity):
+    """Rescaling for h_an_conc_step — 11 params: step_function[2] + expfunc1[4] + expfunc2[4] + logfunc[1].
+
+    "decrease": h decreases with DN and x.
+    "increase": h increases with DN and x.
+    """
+    if monotonicity == "decrease":
+        signs = jnp.array([ 0, 0, 0, +1, +1, -1, 0, +1, +1, -1, -1])
+    elif monotonicity == "increase":
+        signs = jnp.array([ 0, 0, 0, +1, +1, +1, 0, +1, +1, +1, -1])
+    else:
+        signs = jnp.zeros(11, dtype=int)
+    return _apply_softplus(params, signs)
+
+def J_an_an_conc_step_rescale(params, monotonicity):
+    """Rescaling for J_an_an_conc_step — 13 params: step_function[2] + sol_sol_func1[5] + sol_sol_func2[5] + logfunc[1].
+
+    "increase": J increases with DN and x (default physics for anion-anion).
+    "decrease": J decreases with DN and x.
+    """
+    if monotonicity == "increase":
+        signs = jnp.array([ 0, 0, 0, +1, 0, -1, -1, 0, +1, 0, -1, -1, -1])
+    elif monotonicity == "decrease":
+        signs = jnp.array([ 0, 0, 0, +1, 0, +1, +1, 0, +1, 0, +1, +1, -1])
+    else:
+        signs = jnp.zeros(13, dtype=int)
+    return _apply_softplus(params, signs)    
