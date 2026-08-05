@@ -62,6 +62,77 @@ def _freeze_mono(d):
 
 
 # ---------------------------------------------------------------------------
+# Pair-block symmetrization
+# ---------------------------------------------------------------------------
+
+#: Default symmetrization mode for the J_ss / J_aa blocks.  See
+#: ``symmetrize_pair_block`` and ``docs/asymmetry-fix.md`` for the rationale.
+DEFAULT_PAIR_SYMMETRY = "group"
+
+
+def symmetrize_pair_block(J, groups):
+    """Make a same-kind J block symmetric, respecting species group structure.
+
+    ``sol_sol_func`` is **not** symmetric in its two inputs — it computes
+    ``L0 + H0/(1+exp(a0 + a1*dn + a2*an))`` and fitted ``a1 != a2``.  The
+    generic ``default_J_sol_sol`` feeds ``(dn_i, dn_j)`` into the DN-DN block
+    and ``(an_i, an_j)`` into the AN-AN block, so ``J[i,j] != J[j,i]``.  That is
+    invalid for a pair coupling: the energy of an (i,j) pair cannot depend on
+    which partner is named first.
+
+    In those two blocks *both* slots receive the same kind of descriptor (two
+    donor numbers, or two acceptor numbers), so ``a1 != a2`` carries no physical
+    meaning — it only records which partner was written first.  This function
+    removes that artifact while preserving the one ordering that *is* physical:
+    the role ordering between different species groups.
+
+    Rules:
+      * **same group** (interchangeable partners, e.g. the five HEE solvents) →
+        average the two orderings.  Symmetric and invariant to how the species
+        are listed.
+      * **different groups** (distinct roles, e.g. solvent vs diluent) → the
+        species from the lower-ranked group takes the first slot.  Symmetric and
+        independent of list position, because the choice follows group rank.
+
+    The diagonal is untouched (``0.5*(J_ii + J_ii) == J_ii``), so single-species
+    blocks are bit-for-bit unchanged.
+
+    With ``groups`` all-distinct this reproduces the legacy ``fit_model.py``
+    convention exactly (verified to 2.2e-16 on the 2-solvent LHCE case), because
+    the old code hardcoded the same argument order into both ``j01`` and ``j10``.
+
+    Args:
+        J:      square block, shape (n, n)
+        groups: integer group rank per species, shape (n,)
+
+    Returns:
+        Symmetric block of shape (n, n).
+    """
+    grp  = jnp.asarray(groups)
+    same = grp[:, None] == grp[None, :]
+    lo   = grp[:, None] <  grp[None, :]
+    return jnp.where(same, 0.5 * (J + J.T),      # in-group: interchangeable
+                     jnp.where(lo, J, J.T))      # cross-group: lower rank first
+
+
+def _resolve_groups(groups, n_species):
+    """Normalize ``groups`` to a hashable tuple of length ``n_species``.
+
+    ``None`` means all-distinct (``0, 1, ..., n-1``), which reproduces the
+    legacy per-species ordering and keeps existing results unchanged.
+    """
+    if groups is None:
+        return tuple(range(n_species))
+    groups = tuple(int(g) for g in groups)
+    if len(groups) != n_species:
+        raise ValueError(
+            f"groups has length {len(groups)} but there are {n_species} species "
+            f"(solvents first, then anions)."
+        )
+    return groups
+
+
+# ---------------------------------------------------------------------------
 # Legacy fixed-species functions (2 solvents + 1 anion)
 # ---------------------------------------------------------------------------
 
@@ -426,6 +497,8 @@ def energetics(
     J_sol_an_func=default_J_sol_an,
     J_an_an_func=default_J_an_an,
     monotonicity_dict=None,
+    groups=None,
+    pair_symmetry=DEFAULT_PAIR_SYMMETRY,
     rescale_h_sol=default_h_sol_rescale,
     rescale_h_an=default_h_an_rescale,
     rescale_J_sol_sol=default_J_sol_sol_rescale,
@@ -454,6 +527,14 @@ def energetics(
         J_sol_an_func:  callable(dn_an, an_sol, x_sol, x_an, params) → scalar
         J_an_an_func:   callable(dn_i, x_i, dn_j, x_j, params) → scalar
         monotonicity_dict: frozenset from _freeze_mono(), or None for default.
+        groups:        integer group rank per species, length N+M, solvents
+                       first then anions.  Species sharing a rank are treated as
+                       interchangeable; different ranks encode distinct roles.
+                       None (default) = all-distinct, which preserves the legacy
+                       per-species ordering.  See ``symmetrize_pair_block``.
+        pair_symmetry: "group" (default) applies ``symmetrize_pair_block`` to the
+                       J_ss and J_aa blocks; "none" leaves them as-is, which
+                       reproduces the pre-fix (non-symmetric) behaviour.
         rescale_h_sol, rescale_h_an, rescale_J_sol_sol, rescale_J_sol_an,
         rescale_J_an_an, rescale_conc_factor:
                        companion rescaling functions for each parameter group.
@@ -532,6 +613,20 @@ def energetics(
 
     J_aa = jax.vmap(_J_aa_row)(dn_an, x_an)  # (M, M)
 
+    # --- Symmetrize the same-kind blocks ---
+    # J_ss and J_aa are built from a J term whose two slots receive the same kind
+    # of descriptor, so the raw blocks are asymmetric whenever the underlying
+    # function weights its slots differently (sol_sol_func does: a1 != a2).
+    # J_sa needs no treatment: its slots hold genuinely different quantities
+    # (anion DN vs solvent AN) and the block is symmetrized below by J_sa.T.
+    if pair_symmetry == "group":
+        n_sol = dn_sol.shape[0]
+        grp = _resolve_groups(groups, n_sol + dn_an.shape[0])
+        J_ss = symmetrize_pair_block(J_ss, grp[:n_sol])
+        J_aa = symmetrize_pair_block(J_aa, grp[n_sol:])
+    elif pair_symmetry != "none":
+        raise ValueError(f"pair_symmetry must be 'group' or 'none', got {pair_symmetry!r}")
+
     # --- Item 3: jnp.block assembles the 2×2 block matrix in one XLA op ---
     # J_sa.T gives the anion-solvent (M, N) block; symmetry is exact by construction.
     J = jnp.block([[J_ss, J_sa],
@@ -548,6 +643,8 @@ def equations(
     J_sol_an_func=default_J_sol_an,
     J_an_an_func=default_J_an_an,
     monotonicity_dict=None,
+    groups=None,
+    pair_symmetry=DEFAULT_PAIR_SYMMETRY,
     rescale_h_sol=default_h_sol_rescale,
     rescale_h_an=default_h_an_rescale,
     rescale_J_sol_sol=default_J_sol_sol_rescale,
@@ -565,6 +662,7 @@ def equations(
         h_sol_func=h_sol_func, h_an_func=h_an_func,
         J_sol_sol_func=J_sol_sol_func, J_sol_an_func=J_sol_an_func,
         J_an_an_func=J_an_an_func, monotonicity_dict=monotonicity_dict,
+        groups=groups, pair_symmetry=pair_symmetry,
         rescale_h_sol=rescale_h_sol, rescale_h_an=rescale_h_an,
         rescale_J_sol_sol=rescale_J_sol_sol, rescale_J_sol_an=rescale_J_sol_an,
         rescale_J_an_an=rescale_J_an_an, rescale_conc_factor=rescale_conc_factor,
@@ -578,7 +676,7 @@ def equations(
     "max_tries",
     "h_sol_func", "h_an_func",
     "J_sol_sol_func", "J_sol_an_func", "J_an_an_func",
-    "monotonicity_dict",
+    "monotonicity_dict", "groups", "pair_symmetry",
     "rescale_h_sol", "rescale_h_an",
     "rescale_J_sol_sol", "rescale_J_sol_an", "rescale_J_an_an",
     "rescale_conc_factor",
@@ -592,6 +690,8 @@ def _find_root_impl(
     J_sol_an_func=default_J_sol_an,
     J_an_an_func=default_J_an_an,
     monotonicity_dict=None,
+    groups=None,
+    pair_symmetry=DEFAULT_PAIR_SYMMETRY,
     rescale_h_sol=default_h_sol_rescale,
     rescale_h_an=default_h_an_rescale,
     rescale_J_sol_sol=default_J_sol_sol_rescale,
@@ -610,6 +710,7 @@ def _find_root_impl(
         h_sol_func=h_sol_func, h_an_func=h_an_func,
         J_sol_sol_func=J_sol_sol_func, J_sol_an_func=J_sol_an_func,
         J_an_an_func=J_an_an_func, monotonicity_dict=monotonicity_dict,
+        groups=groups, pair_symmetry=pair_symmetry,
         rescale_h_sol=rescale_h_sol, rescale_h_an=rescale_h_an,
         rescale_J_sol_sol=rescale_J_sol_sol, rescale_J_sol_an=rescale_J_sol_an,
         rescale_J_an_an=rescale_J_an_an, rescale_conc_factor=rescale_conc_factor,
@@ -679,6 +780,8 @@ def find_root(
     J_sol_an_func=default_J_sol_an,
     J_an_an_func=default_J_an_an,
     monotonicity_dict=DEFAULT_MONOTONICITY,
+    groups=None,
+    pair_symmetry=DEFAULT_PAIR_SYMMETRY,
     rescale_h_sol=default_h_sol_rescale,
     rescale_h_an=default_h_an_rescale,
     rescale_J_sol_sol=default_J_sol_sol_rescale,
@@ -701,6 +804,13 @@ def find_root(
         J_an_an_func:      J term for anion pairs   — default: sol_sol_func of (dn_i, dn_j)
         monotonicity_dict: dict controlling monotonicity constraints — see DEFAULT_MONOTONICITY.
                            Converted to a frozenset internally for JAX static-arg hashing.
+        groups:            integer group rank per species, length N+M, solvents first then
+                           anions.  Same rank = interchangeable partners (averaged); different
+                           ranks = distinct roles (lower rank takes the first slot).  None
+                           (default) = all-distinct, preserving legacy ordering.  Example: an
+                           equimolar 5-solvent mixture with one salt is ``(0,0,0,0,0,1)``.
+        pair_symmetry:     "group" (default) symmetrizes the J_ss / J_aa blocks;
+                           "none" reproduces the pre-fix non-symmetric behaviour.
         rescale_h_sol, rescale_h_an, rescale_J_sol_sol, rescale_J_sol_an,
         rescale_J_an_an, rescale_conc_factor:
                            companion rescaling functions (defaults match default term functions).
@@ -720,6 +830,7 @@ def find_root(
         h_sol_func=h_sol_func, h_an_func=h_an_func,
         J_sol_sol_func=J_sol_sol_func, J_sol_an_func=J_sol_an_func,
         J_an_an_func=J_an_an_func, monotonicity_dict=_freeze_mono(monotonicity_dict),
+        groups=_resolve_groups(groups, n_species), pair_symmetry=pair_symmetry,
         rescale_h_sol=rescale_h_sol, rescale_h_an=rescale_h_an,
         rescale_J_sol_sol=rescale_J_sol_sol, rescale_J_sol_an=rescale_J_sol_an,
         rescale_J_an_an=rescale_J_an_an, rescale_conc_factor=rescale_conc_factor,
@@ -734,6 +845,8 @@ def get_root_error(
     J_sol_an_func=default_J_sol_an,
     J_an_an_func=default_J_an_an,
     monotonicity_dict=DEFAULT_MONOTONICITY,
+    groups=None,
+    pair_symmetry=DEFAULT_PAIR_SYMMETRY,
     rescale_h_sol=default_h_sol_rescale,
     rescale_h_an=default_h_an_rescale,
     rescale_J_sol_sol=default_J_sol_sol_rescale,
@@ -748,6 +861,8 @@ def get_root_error(
         h_sol_func=h_sol_func, h_an_func=h_an_func,
         J_sol_sol_func=J_sol_sol_func, J_sol_an_func=J_sol_an_func,
         J_an_an_func=J_an_an_func, monotonicity_dict=_freeze_mono(monotonicity_dict),
+        groups=_resolve_groups(groups, len(solvents) + len(anions)),
+        pair_symmetry=pair_symmetry,
         rescale_h_sol=rescale_h_sol, rescale_h_an=rescale_h_an,
         rescale_J_sol_sol=rescale_J_sol_sol, rescale_J_sol_an=rescale_J_sol_an,
         rescale_J_an_an=rescale_J_an_an, rescale_conc_factor=rescale_conc_factor,
@@ -762,6 +877,8 @@ def li_free_energy(
     J_sol_an_func=default_J_sol_an,
     J_an_an_func=default_J_an_an,
     monotonicity_dict=DEFAULT_MONOTONICITY,
+    groups=None,
+    pair_symmetry=DEFAULT_PAIR_SYMMETRY,
     rescale_h_sol=default_h_sol_rescale,
     rescale_h_an=default_h_an_rescale,
     rescale_J_sol_sol=default_J_sol_sol_rescale,
@@ -790,12 +907,14 @@ def li_free_energy(
     n_species = len(solvents) + len(anions)
     initial_guess = jnp.ones(n_species) / n_species
     mono_frozen = _freeze_mono(monotonicity_dict)
+    grp = _resolve_groups(groups, n_species)
     vars, _ = _find_root_impl(
         input_params, dn_sol, an_sol, x_sol, v_sol, dn_an, x_an, v_an, z,
         initial_guess, max_tries=10,
         h_sol_func=h_sol_func, h_an_func=h_an_func,
         J_sol_sol_func=J_sol_sol_func, J_sol_an_func=J_sol_an_func,
         J_an_an_func=J_an_an_func, monotonicity_dict=mono_frozen,
+        groups=grp, pair_symmetry=pair_symmetry,
         rescale_h_sol=rescale_h_sol, rescale_h_an=rescale_h_an,
         rescale_J_sol_sol=rescale_J_sol_sol, rescale_J_sol_an=rescale_J_sol_an,
         rescale_J_an_an=rescale_J_an_an, rescale_conc_factor=rescale_conc_factor,
@@ -805,6 +924,7 @@ def li_free_energy(
         h_sol_func=h_sol_func, h_an_func=h_an_func,
         J_sol_sol_func=J_sol_sol_func, J_sol_an_func=J_sol_an_func,
         J_an_an_func=J_an_an_func, monotonicity_dict=mono_frozen,
+        groups=grp, pair_symmetry=pair_symmetry,
         rescale_h_sol=rescale_h_sol, rescale_h_an=rescale_h_an,
         rescale_J_sol_sol=rescale_J_sol_sol, rescale_J_sol_an=rescale_J_sol_an,
         rescale_J_an_an=rescale_J_an_an, rescale_conc_factor=rescale_conc_factor,

@@ -120,9 +120,69 @@ occupations, found_valid = find_root(params, solvents, anions, z=1.86)
 ```
 
 > **Key difference:** `params_salt` (old, 5 elem, `expfunc` functional form for j22) was
-> replaced by `params_anion_anion` (new, 6 elem, `sol_sol_func` for j22). The two are
-> **not interchangeable** — loaded checkpoints from the old code cannot be passed to the
-> new interface without re-training.
+> replaced by `params_anion_anion` (new, 6 elem, `sol_sol_func` for j22). The two have
+> different functional forms, so an old checkpoint cannot be dropped into the new
+> interface *unchanged*.
+>
+> **However — with a single anion (M=1) old checkpoints ARE usable without re-training.**
+> The anion-anion term then only ever appears as the self-interaction `j22`, so injecting
+> the old functional form reproduces it exactly (verified: `h` matches `energetics_old`
+> to 0.0). This is how the HCE and HEE studies reuse the trial-25 models:
+>
+> ```python
+> from IsingLHCE.interactions import expfunc, logfunc, _apply_softplus
+>
+> def old_J_an_an(dn_i, x_i, dn_j, x_j, p):          # legacy j22
+>     return expfunc(dn_i, p[:4]) + logfunc(x_i, p[4])
+>
+> def old_J_an_an_rescale(p, monotonicity):
+>     return _apply_softplus(p, jnp.array([0, +1, +1, +1, -1]))
+>
+> params["params_anion_anion"] = params["params_salt"]   # 5-elem; the func uses [:5]
+> occ, ok = find_root(params, solvents, anions, z=3.72/2.0,
+>                     J_an_an_func=old_J_an_an,
+>                     rescale_J_an_an=old_J_an_an_rescale,
+>                     monotonicity_dict=LEGACY_MONOTONICITY, groups=...)
+> ```
+>
+> With **two or more anions** the forms genuinely diverge and re-training is required.
+>
+> The legacy monotonicity constraints map onto the new presets exactly:
+> `sol_params_dn`, `salt_params_dn`, `params_sol_salt_an`, `params_sol_sol` → `"decrease"`;
+> `conc_factor_sol` → `"increase"`; `params_anion_anion` uses the custom rescale above.
+
+### 2c. Species groups (`groups`) — required reading for N >= 3 solvents
+
+`sol_sol_func` weights its two inputs differently (`a1 != a2`), so the raw
+solvent-solvent block is **not symmetric** — invalid for a pair coupling. The generic
+interface repairs this at assembly time using a `groups` argument.
+
+`groups` is an integer rank per species, length `N+M`, **solvents first then anions**:
+
+- **same rank** = interchangeable partners → their coupling is averaged over both
+  orderings (symmetric *and* independent of how you list them);
+- **different rank** = distinct roles → the lower-ranked species takes the first slot
+  (symmetric, and follows the role rather than the list position).
+
+```python
+find_root(params, solvents, anions, z=1.86, groups=(0, 1, 2))          # LHCE: solvent, diluent, anion
+find_root(params, solvents, anions, z=1.86, groups=(0, 0, 0, 0, 0, 1)) # HEE: 5 interchangeable solvents + salt
+```
+
+`groups=None` (the default) means all-distinct, which reproduces the legacy
+`fit_model.py` ordering exactly — so **existing results do not shift unless you opt in.**
+Pass `pair_symmetry="none"` to restore the pre-fix behaviour for comparison.
+
+Rules of thumb:
+
+- **N=1** (e.g. HCE) — `groups` is irrelevant; there are no off-diagonal solvent pairs.
+- **N=2 with real roles** (LHCE solvent/diluent) — use all-distinct; it is bit-exact
+  against the fitted model.
+- **N>=3 interchangeable** (HEE) — you *must* pass a shared group, or the answer will
+  depend on the arbitrary order you listed the solvents in.
+
+See `docs/asymmetry-fix.md` for the derivation, measured magnitudes, and the open
+question about how groups should be declared for additive formulations.
 
 ---
 
