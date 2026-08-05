@@ -191,6 +191,8 @@ were also run standalone):
 | end-to-end `find_root` vs `find_root_old`, **real trial-25 params**, all 5 models, LHCE G4/FB/TFSI at `x_anion=0.15` | occupations agree to **<= 2.3e-10** (Broyden tolerance), `found_valid=True` both paths |
 | shared group, sampled orderings | couplings **invariant** |
 | all-distinct, sampled orderings | order-dependent *by design* |
+| **real system**: HEE `DME-EA-MA-PP-THF` + LiTFSI at 1.0 m, 5-model ensemble, solvent list permuted — `groups=(0,0,0,0,0,1)` | occupations shift by **3.9e-10** (solver tolerance) |
+| same system with `groups=(0,1,2,3,4,5)` | occupations shift by **1.3e-3** — a pure listing-order artifact |
 | `J == J.T` for several groupings | passes |
 | `pair_symmetry="none"` still asymmetric | passes (guards against vacuous tests) |
 | N=1 identical under every grouping/mode | passes |
