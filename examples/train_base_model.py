@@ -109,6 +109,11 @@ def initialize_params_old(mode="from_scratch", file_path=None, random_seed=42):
         init_params = {}
         for i, name in enumerate(_KEY_ORDER):
             base = _HAND_TUNED[name]
+            if name == "conc_factor_sol":
+                # fit_model.py leaves this unperturbed: its entries reach ~±2000, so
+                # 5% multiplicative noise shifts them by ~±100 and the solver NaNs.
+                init_params[name] = base
+                continue
             init_params[name] = base * (1.0 + noise_scale * random.normal(
                 keys[i], shape=base.shape
             ))

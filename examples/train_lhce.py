@@ -2,14 +2,15 @@
 
 Usage
 -----
-# Via YAML config (recommended):
-    python examples/train_lhce.py config.yaml
+# Via YAML config (recommended), from the repository root:
+    python examples/train_lhce.py examples/config.yaml
 
 # Via CLI flags:
-    python examples/train_lhce.py --train data/train.csv --val data/val.csv --test data/test.csv
+    python examples/train_lhce.py --train examples/data/lhce_md/fold_0/train.csv \
+        --val examples/data/lhce_md/fold_0/val.csv --test examples/data/lhce_md/fold_0/test.csv
 
 # CLI flags override YAML when both are supplied:
-    python examples/train_lhce.py config.yaml --epochs 500 --trials 3
+    python examples/train_lhce.py examples/config.yaml --epochs 500 --trials 3
 
 Config fields (YAML keys = long CLI flag names)
 -----------------------------------------------
@@ -20,9 +21,9 @@ Config fields (YAML keys = long CLI flag names)
     trials          Number of random-seed trials   (default: 10)
     seed            Base random seed               (default: 42)
     checkpoint      Output path for best params    (default: trained_params.pkl)
-    learning_rate   Initial Adam LR                (default: 0.01)
-    lr_decay_steps  Exponential decay steps        (default: 100)
-    lr_decay_rate   Exponential decay rate         (default: 0.99)
+    learning_rate   Initial Adam LR                (default: 0.002)
+    lr_decay_steps  Exponential decay steps        (default: 1000)
+    lr_decay_rate   Exponential decay rate         (default: 0.95)
 
     # Optional — term function overrides (string names from IsingLHCE.interactions)
     h_sol_func      Name of h(Li-sol) function     (default: package default)
@@ -32,12 +33,12 @@ Config fields (YAML keys = long CLI flag names)
     j_an_an_func    Name of J(anion-anion) function(default: package default)
 
     # Optional - rescale parameter function overrides (string names from IsingLHCE.interactions)
-    rescale_h_sol          Name of h(Li-sol) rescale function       (default: None)
-    rescale_h_an           Name of h(Li-anion) rescale function     (default: None)
-    rescale_J_sol_sol      Name of J(sol-sol) rescale function      (default: None)
-    rescale_J_sol_an       Name of J(sol-anion) rescale function    (default: None)
-    rescale_J_an_an        Name of J(anion-anion) rescale function  (default: None)
-    rescale_conc_factor    Name of concentration rescale function   (default: None)
+    rescale_h_sol          Name of h(Li-sol) rescale function       (default: package default)
+    rescale_h_an           Name of h(Li-anion) rescale function     (default: package default)
+    rescale_J_sol_sol      Name of J(sol-sol) rescale function      (default: package default)
+    rescale_J_sol_an       Name of J(sol-anion) rescale function    (default: package default)
+    rescale_J_an_an        Name of J(anion-anion) rescale function  (default: package default)
+    rescale_conc_factor    Name of concentration rescale function   (default: package default)
 
     # Optional - monotonicity constraint dict
     monotonicity_dict      Dict mapping param keys to "increase"/"decrease".
@@ -71,6 +72,9 @@ import IsingLHCE.train as ising_train
 from IsingLHCE.interactions import (
     default_h_sol, default_h_an,
     default_J_sol_sol, default_J_sol_an, default_J_an_an,
+    default_h_sol_rescale, default_h_an_rescale,
+    default_J_sol_sol_rescale, default_J_sol_an_rescale, default_J_an_an_rescale,
+    default_conc_factor_rescale,
 )
 from IsingLHCE.model import DEFAULT_MONOTONICITY
 from IsingLHCE.train import initialize_params, train, parity_results
@@ -208,9 +212,9 @@ DEFAULTS = {
     "trials":          10,
     "seed":            42,
     "checkpoint":      "trained_params.pkl",
-    "learning_rate":   1e-2,
-    "lr_decay_steps":  100,
-    "lr_decay_rate":   0.99,
+    "learning_rate":   2e-3,
+    "lr_decay_steps":  1000,
+    "lr_decay_rate":   0.95,
     # Optional term-function overrides (string names from IsingLHCE.interactions)
     "h_sol_func":      None,
     "h_an_func":       None,
@@ -383,12 +387,12 @@ def main(argv=None):
     # Resolve rescale functions (optional)
     # Script-level CUSTOMIZATION values take precedence over YAML/CLI strings.
     # -------------------------------------------------------------------
-    rescale_h_sol      = _resolve_func(RESCALE_H_SOL      or cfg.get("rescale_h_sol"),      None)
-    rescale_h_an       = _resolve_func(RESCALE_H_AN       or cfg.get("rescale_h_an"),       None)
-    rescale_J_sol_sol     = _resolve_func(RESCALE_J_SOL_SOL  or cfg.get("rescale_J_sol_sol"),  None)
-    rescale_J_sol_an      = _resolve_func(RESCALE_J_SOL_AN   or cfg.get("rescale_J_sol_an"),   None)
-    rescale_J_an_an       = _resolve_func(RESCALE_J_AN_AN    or cfg.get("rescale_J_an_an"),    None)
-    rescale_conc_factor   = _resolve_func(RESCALE_CONC_FACTOR or cfg.get("rescale_conc_factor"), None)
+    rescale_h_sol      = _resolve_func(RESCALE_H_SOL      or cfg.get("rescale_h_sol"),      default_h_sol_rescale)
+    rescale_h_an       = _resolve_func(RESCALE_H_AN       or cfg.get("rescale_h_an"),       default_h_an_rescale)
+    rescale_J_sol_sol     = _resolve_func(RESCALE_J_SOL_SOL  or cfg.get("rescale_J_sol_sol"),  default_J_sol_sol_rescale)
+    rescale_J_sol_an      = _resolve_func(RESCALE_J_SOL_AN   or cfg.get("rescale_J_sol_an"),   default_J_sol_an_rescale)
+    rescale_J_an_an       = _resolve_func(RESCALE_J_AN_AN    or cfg.get("rescale_J_an_an"),    default_J_an_an_rescale)
+    rescale_conc_factor   = _resolve_func(RESCALE_CONC_FACTOR or cfg.get("rescale_conc_factor"), default_conc_factor_rescale)
 
     # -------------------------------------------------------------------
     # Resolve monotonicity dict

@@ -1,3 +1,5 @@
+import os
+
 import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
@@ -122,9 +124,7 @@ def sol_dn_func_no_conc_factor(sol_params_dn):
     y_pred = expfunc(x_pred, sol_params_dn[:4])
     plt.plot(x_pred.flatten(), y_pred.flatten())
     # plot the half wave potential exp data points
-    df = pd.read_csv(
-        "/nfs/turbo/coe-venkvis/zhaohc/ising-electrolyte/LHCE/Ising-model-fitting/DN_trade_offs.csv"
-    )
+    df = pd.read_csv(os.path.join(os.path.dirname(__file__), "DN_trade_offs.csv"))
     plt.plot(df["x"], df["y"], "o", label="Exp Li|Li$^+$ half-wave potential")
     plt.xlabel("Solvent DN")
     plt.ylabel("$h_{Li^+-sol}$")

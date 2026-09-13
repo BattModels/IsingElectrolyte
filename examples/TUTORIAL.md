@@ -16,10 +16,17 @@ src/IsingLHCE/
 ├── train.py               # training loop: objective, update, train, parity_results
 └── analysis/              # plotting helpers (h-terms, J-terms, free energy, conc-vol viz)
 
+src/IsingLHCE/
+├── pretrained.py          # load the 5 cross-validation models from the paper
+└── pretrained_models/     # their parameters (.npz)
+
 examples/
+├── predict_solvation.py   # predict an LHCE solvation shell with the paper model
+├── reproduce_paper_cv.py  # reproduce the paper's 5-fold CV accuracy
 ├── train_base_model.py    # legacy 2-sol+1-anion replication (params_salt interface)
 ├── train_lhce.py          # new generic interface with YAML config
 ├── config.yaml            # YAML config for train_lhce.py
+├── data/lhce_md/fold_k/   # the paper's MD dataset, split into 5 CV folds
 └── TUTORIAL.md            # this file
 ```
 
@@ -42,14 +49,15 @@ On top of the primitives, `interactions.py` also defines **default term function
 wrap the primitives into the standard h / J physics:
 
 ```python
-default_h_sol(props, params)       # h(Li–solvent): expfunc(dn_eff) + logfunc(x)
-default_h_anion(props, params)     # h(Li–anion):   expfunc(dn_an) + logfunc(x)
-default_J_sol_sol(props_i, props_j, params)    # 16-param solvent-solvent coupling
-default_J_sol_anion(props_sol, props_anion, params)  # 6-param solvent-anion coupling
-default_J_anion_anion(props_i, props_j, params)      # 6-param anion-anion coupling
+default_h_sol(dn_eff, x, params)                        # h(Li–solvent): expfunc(dn_eff) + logfunc(x)
+default_h_an(dn_an, x, params)                          # h(Li–anion):   expfunc(dn_an) + logfunc(x)
+default_J_sol_sol(dn_i, an_i, x_i, dn_j, an_j, x_j, params)  # 16-param solvent-solvent coupling
+default_J_sol_an(dn_an, an_sol, x_sol, x_an, params)    # 6-param solvent-anion coupling
+default_J_an_an(dn_i, x_i, dn_j, x_j, params)           # 6-param anion-anion coupling
+legacy_J_an_an(dn_i, x_i, dn_j, x_j, params)            # 5-param anion-anion term of the paper model
 ```
 
-Each of these has a **rescale companion** (`default_h_sol_rescale`, etc.) that applies
+Each of these has a **rescale companion** (`default_h_sol_rescale`, …, `legacy_J_an_an_rescale`) that applies
 signed softplus to enforce monotonicity constraints — more on that in §4.
 
 ---
@@ -97,12 +105,12 @@ The new interface supports **N solvents + M anions** and uses injectable h/J fun
 Species are passed as nested dicts instead of flat tuples:
 
 ```python
-solvents = {
-    "EC":  {"dn": 16.4, "an": 18.4, "x": 0.6, "volume": 66.0},
-    "DMC": {"dn": 15.1, "an": 16.0, "x": 0.3, "volume": 84.8},
+solvents = {   # dn, an in kcal/mol; x = mole fraction (Li+ counted); volume in Å^3/molecule
+    "DME": {"dn": 20.0, "an": 10.2, "x": 0.2434, "volume": 135.53},
+    "TTE": {"dn":  1.9, "an": 20.0, "x": 0.4868, "volume": 187.76},
 }
 anions = {
-    "LiFSI": {"dn": 5.0, "x": 0.1, "volume": 100.0},
+    "TFSI": {"dn": 11.2, "x": 0.1349, "volume": 209.76},
 }
 occupations, found_valid = find_root(params, solvents, anions, z=1.86)
 ```
@@ -127,23 +135,21 @@ occupations, found_valid = find_root(params, solvents, anions, z=1.86)
 > **However — with a single anion (M=1) old checkpoints ARE usable without re-training.**
 > The anion-anion term then only ever appears as the self-interaction `j22`, so injecting
 > the old functional form reproduces it exactly (verified: `h` matches `energetics_old`
-> to 0.0). This is how the HCE and HEE studies reuse the trial-25 models:
+> to 0.0). This is how the HCE and HEE studies reuse the trial-25 (paper) models, and
+> `IsingLHCE.pretrained.load_paper_model` packages exactly this recipe:
 >
 > ```python
-> from IsingLHCE.interactions import expfunc, logfunc, _apply_softplus
+> from IsingLHCE.pretrained import load_paper_model, PAPER_Z
 >
-> def old_J_an_an(dn_i, x_i, dn_j, x_j, p):          # legacy j22
->     return expfunc(dn_i, p[:4]) + logfunc(x_i, p[4])
->
-> def old_J_an_an_rescale(p, monotonicity):
->     return _apply_softplus(p, jnp.array([0, +1, +1, +1, -1]))
->
-> params["params_anion_anion"] = params["params_salt"]   # 5-elem; the func uses [:5]
-> occ, ok = find_root(params, solvents, anions, z=3.72/2.0,
->                     J_an_an_func=old_J_an_an,
->                     rescale_J_an_an=old_J_an_an_rescale,
->                     monotonicity_dict=LEGACY_MONOTONICITY, groups=...)
+> params, model_kwargs = load_paper_model(fold=0)
+> # model_kwargs = {"J_an_an_func": legacy_J_an_an,
+> #                 "rescale_J_an_an": legacy_J_an_an_rescale,
+> #                 "monotonicity_dict": PAPER_MONOTONICITY}
+> occ, ok = find_root(params, solvents, anions, PAPER_Z, **model_kwargs, groups=...)
 > ```
+>
+> For your own legacy `.pkl` checkpoint, set `params["params_anion_anion"] = params["params_salt"]`
+> and pass the same `model_kwargs`.
 >
 > With **two or more anions** the forms genuinely diverge and re-training is required.
 >
@@ -195,8 +201,8 @@ the loop locally against the `_old` physics).
 | Old `fit_model.py` | `train.py` | Notes |
 |--------------------|------------|-------|
 | `initialize_params(mode, file_path, seed)` | `initialize_params(mode, file_path, seed, param_sizes)` | new key `params_anion_anion`; rejects old checkpoints with `params_salt` |
-| `objective_single(params, constants, m, n, l, guess)` | `objective_single(params, sol_props, anion_props, z, targets, guess, ...)` | new species-dict interface |
-| `total_objective(params, data)` | `total_objective(params, data, monotonicity_dict, ...)` | `data` uses `sol_props`/`anion_props` keys |
+| `objective_single(params, constants, m, n, l, guess)` | `objective_single(params, dn_sol, an_sol, x_sol, v_sol, dn_an, x_an, v_an, z, targets, guess, ...)` | per-species arrays |
+| `total_objective(params, data)` | `total_objective(params, data, monotonicity_dict, ...)` | `data` uses `dn_sol`, `dn_an`, … keys (below) |
 | `update(params, opt_state, data)` | `update(params, opt_state, data, monotonicity_dict, ...)` | module-level `optimizer` global |
 | `train(params, epochs, ...)` | `train(params, epochs, ..., monotonicity_dict, ...)` | same early-stopping logic |
 | `parity_results(data_dict, params)` | `parity_results(data_dict, params, monotonicity_dict, ...)` | same CSV+plot outputs |
@@ -204,13 +210,15 @@ the loop locally against the `_old` physics).
 The `data` dict expected by the new `train.py` functions:
 ```python
 data = {
-    "sol_props":   {"dn": ..., "an": ..., "x": ..., "v": ...},  # each shape (n, N_sol)
-    "anion_props": {"dn": ..., "x": ..., "v": ...},              # each shape (n, N_an)
-    "z":           ...,   # shape (n,)
-    "targets":     ...,   # shape (n, N_sol + N_an)
-    "init_guess":  ...,   # shape (n, N_sol + N_an)
+    "dn_sol": ..., "an_sol": ..., "x_sol": ..., "v_sol": ...,  # each shape (n, N_sol)
+    "dn_an":  ..., "x_an":   ..., "v_an":  ...,                # each shape (n, N_an)
+    "z":          ...,   # shape (n,)
+    "targets":    ...,   # shape (n, N_sol + N_an)
+    "init_guess": ...,   # shape (n, N_sol + N_an); filled in by train()
 }
 ```
+
+`examples/train_lhce.py` (`load_split`) builds this dict from the dataset CSVs.
 
 ---
 
@@ -225,10 +233,10 @@ system in the new package.
 Each term function has a **rescale companion** in `interactions.py`:
 ```python
 default_h_sol_rescale(params, monotonicity)
-default_h_anion_rescale(params, monotonicity)
+default_h_an_rescale(params, monotonicity)
 default_J_sol_sol_rescale(params, monotonicity)
-default_J_sol_anion_rescale(params, monotonicity)
-default_J_anion_anion_rescale(params, monotonicity)
+default_J_sol_an_rescale(params, monotonicity)
+default_J_an_an_rescale(params, monotonicity)
 default_conc_factor_rescale(params, monotonicity)
 ```
 
@@ -269,6 +277,8 @@ input_params = rescale_input_params(input_params, monotonicity_dict={
 
 | Goal | Use |
 |------|-----|
+| Predict with the published model | `IsingLHCE.pretrained.load_paper_model` (see `examples/predict_solvation.py`) |
+| Check the published CV accuracy | `examples/reproduce_paper_cv.py` |
 | Reproduce old `fit_model.py` results exactly | `examples/train_base_model.py` |
 | Train with new generic interface (YAML config) | `examples/train_lhce.py` + `config.yaml` |
 | Use physics in a notebook (old interface) | `from IsingLHCE.model import find_root_old, li_free_energy_old` |
@@ -324,11 +334,14 @@ trials. After training, saves:
 
 ## 7. Quick-Start Recipes
 
-### Reproduce a trial-25 run
+### Retrain one cross-validation fold of the paper
+
+`train_base_model.py` reads `train.csv` / `val.csv` / `test.csv` from the current directory
+and writes its outputs there, so run it inside a copy of a fold:
 
 ```bash
-cd /path/to/trial-25/base-model
-python /path/to/IsingLHCE/examples/train_base_model.py
+cp -r examples/data/lhce_md/fold_0 my_fold_0 && cd my_fold_0
+python ../examples/train_base_model.py
 ```
 
 ### Load a trained checkpoint and inspect predictions
@@ -343,12 +356,12 @@ with open("trained_params.pkl", "rb") as f:
 
 # 2-solvent + 1-anion example
 input_constants = [
-    16.4, 5.0, 5.0,       # dn0, dn1, dn_anion
-    0.6, 0.3,              # x0, x1
-    18.4, 16.0,            # an0, an1
-    0.1,                   # x_anion
-    66.0, 84.8, 100.0,     # solvent_volume, diluent_volume, anion_volume
-    3.72 / 2.0,            # z
+    20.0, 1.9, 11.2,          # dn0, dn1, dn_anion
+    0.2434, 0.4868,           # x0, x1
+    10.2, 20.0,               # an0, an1
+    0.1349,                   # x_anion
+    135.53, 187.76, 209.76,   # solvent_volume, diluent_volume, anion_volume (Å^3)
+    3.72 / 2.0,               # z
 ]
 (m, n, l), found = find_root_old(params, input_constants)
 print(f"Solvent: {m:.3f}, Diluent: {n:.3f}, Anion: {l:.3f}, Valid: {found}")
@@ -360,27 +373,27 @@ print(f"Solvent: {m:.3f}, Diluent: {n:.3f}, Anion: {l:.3f}, Valid: {found}")
 from IsingLHCE.model import find_root
 from IsingLHCE.train import initialize_params
 
-params = initialize_params(mode="from_scratch", random_seed=42)
+params = initialize_params(mode="from_scratch", random_seed=42)   # untrained
 
 solvents = {
-    "EC":  {"dn": 16.4, "an": 18.4, "x": 0.6, "volume": 66.0},
-    "DMC": {"dn": 5.0,  "an": 16.0, "x": 0.3, "volume": 84.8},
+    "DME": {"dn": 20.0, "an": 10.2, "x": 0.2434, "volume": 135.53},
+    "TTE": {"dn":  1.9, "an": 20.0, "x": 0.4868, "volume": 187.76},
 }
 anions = {
-    "LiFSI": {"dn": 5.0, "x": 0.1, "volume": 100.0},
+    "TFSI": {"dn": 11.2, "x": 0.1349, "volume": 209.76},
 }
 occupations, found = find_root(params, solvents, anions, z=1.86)
-# occupations: jnp.array([m_EC, m_DMC, l_LiFSI])
+# occupations: jnp.array([m_DME, n_TTE, l_TFSI])
 ```
 
 ### Run training with the new interface (YAML config)
 
 ```bash
-# edit examples/config.yaml to point to your data files, then:
-python examples/train_lhce.py --config examples/config.yaml
+# from the repository root; config.yaml trains on fold 0 of the shipped dataset
+python examples/train_lhce.py examples/config.yaml
 
 # or override individual settings from the CLI:
-python examples/train_lhce.py --config examples/config.yaml --epochs 2000 --learning_rate 0.001
+python examples/train_lhce.py examples/config.yaml --epochs 2000 --learning_rate 0.001
 ```
 
 ---
@@ -394,16 +407,19 @@ This is useful for experimenting with different functional forms.
 import jax.numpy as jnp
 from IsingLHCE.model import find_root
 
-def my_h_sol(props, params):
-    """Custom field term — linear in DN."""
-    dn_eff = props["dn"] * props["x"]
+def my_h_sol(dn_eff, x, params):
+    """Custom field term — linear in effective DN."""
     a0, a1 = params[:2]
     return a0 + a1 * dn_eff
+
+def my_h_sol_rescale(params, monotonicity):
+    return params   # no constraint
 
 # Pass your function; the package won't touch it — JAX resolves it before JIT
 occupations, found = find_root(
     params, solvents, anions, z=1.86,
     h_sol_func=my_h_sol,
+    rescale_h_sol=my_h_sol_rescale,
 )
 ```
 

@@ -1,10 +1,14 @@
 # Ising LHCE training configuration
-# Run with: python examples/train_lhce.py examples/config.yaml
+# Run from the repository root:
+#   python examples/train_lhce.py examples/config.yaml
+#
+# Paths are relative to the directory you run the command from.
 
-# --- Data paths (relative to your working directory) ---
-train: data/train.csv
-val:   data/val.csv
-test:  data/test.csv
+# --- Data paths ---
+# Fold 0 of the paper's 5-fold cross-validation split (examples/data/lhce_md/fold_{0..4}).
+train: examples/data/lhce_md/fold_0/train.csv
+val:   examples/data/lhce_md/fold_0/val.csv
+test:  examples/data/lhce_md/fold_0/test.csv
 
 # --- Training ---
 epochs:  1000
@@ -15,9 +19,9 @@ seed:    42
 checkpoint: trained_params.pkl
 
 # --- Optimizer ---
-learning_rate:   0.01
-lr_decay_steps:  100
-lr_decay_rate:   0.99
+learning_rate:   0.002   # paper schedule; 0.01 drives the root solver to NaN
+lr_decay_steps:  1000
+lr_decay_rate:   0.95
 
 # --- Term-function overrides (optional) ---
 # Specify a function name from IsingLHCE.interactions to replace the default.
@@ -31,13 +35,15 @@ lr_decay_rate:   0.99
 # j_an_an_func:   null   # default: sol_sol_func(dn_i, dn_j),      6 params
 
 # --- Optional rescale function overrides (string names from IsingLHCE.interactions) ---
-# These functions rescale the parameters through jnp.softplus to ensure desired monotonicity constraints
-rescale_h_sol:      default_h_sol_rescale  # default: decrease with DN
-rescale_h_an:       h_an_conc_step_rescale # default: decrease with DN
-rescale_J_sol_sol:  default_J_sol_sol_rescale # default: decrease with DN/AN
-rescale_J_sol_an:   default_J_sol_an_rescale # default: decrease with DN/AN
-rescale_J_an_an:    J_an_an_conc_step_rescale # default: increase with DN
-rescale_conc_factor: default_conc_factor_rescale # default: increase with concentration and volume
+# These functions rescale the parameters through jnp.softplus to ensure desired monotonicity constraints.
+# Omit a field (or set to null) to keep the companion of the package default term function.
+#
+# rescale_h_sol:       default_h_sol_rescale
+# rescale_h_an:        default_h_an_rescale
+# rescale_J_sol_sol:   default_J_sol_sol_rescale
+# rescale_J_sol_an:    default_J_sol_an_rescale
+# rescale_J_an_an:     default_J_an_an_rescale
+# rescale_conc_factor: default_conc_factor_rescale
 
 # --- Monotonicity constraints (optional) ---
 # Controls the sign of softplus-rescaled parameters.
@@ -59,6 +65,15 @@ rescale_conc_factor: default_conc_factor_rescale # default: increase with concen
 # Example — use package defaults for everything:
 # monotonicity_dict: null
 #
+# Used here — the physically motivated constraints from the paper:
+monotonicity_dict:
+  sol_params_dn:      decrease
+  salt_params_dn:     decrease
+  params_sol_salt_an: decrease
+  params_sol_sol:     decrease
+  params_anion_anion: increase
+  conc_factor_sol:    increase
+#
 # Example — flip anion-anion direction only:
 # monotonicity_dict:
 #   sol_params_dn:      decrease
@@ -74,11 +89,11 @@ rescale_conc_factor: default_conc_factor_rescale # default: increase with concen
 # --- Parameter initialization (optional) ---
 # Keys map directly to initialize_params() kwargs.
 # 'random_seed' is always computed per-trial and is ignored if set here.
-# If 'mode' is omitted, initialize_params() defaults to "from_file".
+# If 'mode' is omitted, initialize_params() uses "from_file" when file_path is
+# given and "from_scratch" otherwise.
 #
-# From-scratch (explicit):
-# initialize_params_kwargs:
-#   mode: from_scratch
+initialize_params_kwargs:
+  mode: from_scratch
 #
 # From checkpoint:
 # initialize_params_kwargs:
