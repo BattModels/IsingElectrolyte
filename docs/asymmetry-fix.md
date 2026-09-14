@@ -1,7 +1,7 @@
 # The `J` asymmetry fix (branch `asymmetry-fix`)
 
 **Status:** implemented, verified, not merged.
-**Scope:** `src/IsingLHCE/model.py` + `tests/test_asymmetry_fix.py`. No parameter
+**Scope:** `src/IsingElectrolyte/model.py` + `tests/test_asymmetry_fix.py`. No parameter
 files change; no retraining is required.
 
 This document exists so that a later cleanup pass can see *why* each line was

@@ -1,4 +1,4 @@
-# IsingLHCE
+# IsingElectrolyte
 
 [![arXiv](https://img.shields.io/badge/arXiv-2609.05671-b31b1b.svg)](https://arxiv.org/abs/2609.05671)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
@@ -11,8 +11,8 @@ This is the code for the paper:
 > **Differentiable Solvation Shell Model for Rational Electrolyte Design.**
 > arXiv:2609.05671 (2026). https://arxiv.org/abs/2609.05671
 
-You give the model a few properties of each solvent and salt in an electrolyte:
-Gutmann donor number (DN), acceptor number (AN), mole fraction and molecular volume.
+Model inputs involve properties of each solvent and salt in an electrolyte:
+Gutmann donor number (DN), acceptor number (AN), mole fraction and molecular volume (here we use DFT-computed molecular size).
 It predicts what fraction of the Li⁺ first solvation shell each species occupies.
 The model is written in [JAX](https://github.com/jax-ml/jax), so it is differentiable
 end to end. Its parameters are fitted directly to solvation structures from molecular
@@ -21,6 +21,11 @@ dynamics (MD) by gradient descent.
 On localized high-concentration electrolytes (LHCEs) it reaches **10.7 % RMSE and
 R² = 0.87** for shell composition in 5-fold cross-validation against MD. A prediction
 takes under a second per formulation, compared with ~100 CPU-hours for MD.
+
+The released parameters were fitted on LHCE data only, yet they transfer to
+high-concentration electrolytes (HCEs) without refitting. The framework itself is not
+LHCE-specific: given solvation data, it can be refitted to other electrolyte classes,
+such as high-entropy electrolytes (HEEs).
 
 This repository contains:
 
@@ -55,8 +60,8 @@ python examples/predict_solvation.py
 ## Quick start: predict a solvation shell
 
 ```python
-from IsingLHCE.model import find_root
-from IsingLHCE.pretrained import load_paper_model, PAPER_Z
+from IsingElectrolyte.model import find_root
+from IsingElectrolyte.pretrained import load_paper_model, PAPER_Z
 
 params, model_kwargs = load_paper_model(fold=0)
 
@@ -89,7 +94,7 @@ print(occupations)   # [DME, TTE, TFSI] share of the Li+ shell: ≈ [0.38, 0.00,
   to convert salt molality and solvent:diluent ratio into these mole fractions.
 - `PAPER_Z = 1.86` is the mean-field coordination number (half of the MD average Li⁺
   coordination number, 3.72).
-- `examples/data/lhce_md/` and `src/IsingLHCE/analysis/solvent_map_dict.csv` list DN, AN
+- `examples/data/lhce_md/` and `src/IsingElectrolyte/analysis/solvent_map_dict.csv` list DN, AN
   and volume for the molecules used in the paper.
 
 ### Outputs
@@ -111,7 +116,7 @@ The five cross-validation models give an uncertainty estimate. Average their pre
 
 ```python
 import numpy as np
-from IsingLHCE.pretrained import load_paper_ensemble
+from IsingElectrolyte.pretrained import load_paper_ensemble
 
 params_list, model_kwargs = load_paper_ensemble()
 occ = np.array([find_root(p, solvents, anions, PAPER_Z, **model_kwargs)[0] for p in params_list])
@@ -124,7 +129,7 @@ print(occ.mean(axis=0), occ.std(axis=0))
 hᵢ is the Li⁺–species interaction:
 
 ```python
-from IsingLHCE.model import li_free_energy
+from IsingElectrolyte.model import li_free_energy
 
 G = li_free_energy(params, solvents, anions, PAPER_Z, **model_kwargs)
 ```
@@ -240,7 +245,7 @@ covers:
 ## Repository layout
 
 ```
-src/IsingLHCE/
+src/IsingElectrolyte/
 ├── model.py                 # mean-field equations, root finding (find_root), free energy
 ├── interactions.py          # h / J term functions and their monotonicity rescalings
 ├── conc_vol_correction.py   # concentration and molecular-size correction of DN / AN

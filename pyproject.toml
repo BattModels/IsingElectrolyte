@@ -3,7 +3,7 @@ requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "IsingLHCE"
+name = "IsingElectrolyte"
 version = "0.1.0"
 description = "Differentiable mean-field Ising model of Li+ solvation shell composition for electrolyte design"
 authors = [
@@ -42,4 +42,4 @@ package-dir = {"" = "src"}
 where = ["src"]
 
 [tool.setuptools.package-data]
-IsingLHCE = ["pretrained_models/*.npz", "analysis/*.csv"]
+IsingElectrolyte = ["pretrained_models/*.npz", "analysis/*.csv"]

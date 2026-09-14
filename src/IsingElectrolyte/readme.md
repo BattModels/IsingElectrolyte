@@ -1,4 +1,4 @@
-# Structure of IsingLHCE code
+# Structure of IsingElectrolyte code
 ## interactions.py
 Includes helper functions for defining interaction terms.
 - mlp: Multi-layer perceptron for modeling interactions.
@@ -16,9 +16,9 @@ Includes helper functions for correcting for concentration and volume effects in
 - conc_factor_power: Power function, multiplication of two power functions, one for concentration and one for volume.
 - conc_factor_wrapped_sigmoid: Sigmoid-based function, lumps concentration and volume into a single sigmoid function.
 ## model.py
-Includes the building of the IsingLHCE model.
+Includes the building of the IsingElectrolyte model.
 - rescale_input_params: Rescales input parameters to ensure monotonicity, optional.
-- energetics: Builds the IsingLHCE model and calculates the energetics of the system. This function is organized as follows:
+- energetics: Builds the IsingElectrolyte model and calculates the energetics of the system. This function is organized as follows:
     - unwrap input parameters.
     - unwrap input constants, including molecular properties (DN, AN, concentration, volume) and coordination number of Li.
     - calculate effective DN, AN by incorporating concentration and volume effects using the functions in conc_vol_correction.py.
@@ -29,7 +29,7 @@ Includes the building of the IsingLHCE model.
 - find_root: uses a Broyden solver to find the root of the equations.
 - get_root_error: calculates how far the root found by the Broyden solver is by calculating f(n) - n vs 0.
 ## train.py
-Includes training functions for the IsingLHCE model.
+Includes training functions for the IsingElectrolyte model.
 <!-- - dn_loss: Loss function for training the model, using root mean squared error between predicted and true Li+ coordination numbers. -->
 - objective_single: objective function for single data point, using root mean squared error between predicted and true Li+ coordination numbers. returns both the loss and new initial guess for the next solving step.
 - total_objective: jnp vectorized version of objective_single, for training on multiple data points.
@@ -75,7 +75,7 @@ Includes helper functions for post-processing the results of the model.
 
 ## Code Structure
 ```
-src/IsingLHCE/
+src/IsingElectrolyte/
 ├── __init__.py
 ├── interactions.py
 ├── conc_vol_correction.py

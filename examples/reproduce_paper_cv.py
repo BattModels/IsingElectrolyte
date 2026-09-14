@@ -12,8 +12,8 @@ import os
 import numpy as np
 import pandas as pd
 
-from IsingLHCE.model import find_root
-from IsingLHCE.pretrained import N_FOLDS, PAPER_Z, load_paper_model
+from IsingElectrolyte.model import find_root
+from IsingElectrolyte.pretrained import N_FOLDS, PAPER_Z, load_paper_model
 
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "lhce_md")
 

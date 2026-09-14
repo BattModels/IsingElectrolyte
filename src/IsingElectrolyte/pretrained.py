@@ -9,8 +9,8 @@ here; together their test folds cover every formulation exactly once.
 
 Usage::
 
-    from IsingLHCE.model import find_root
-    from IsingLHCE.pretrained import load_paper_model, PAPER_Z
+    from IsingElectrolyte.model import find_root
+    from IsingElectrolyte.pretrained import load_paper_model, PAPER_Z
 
     params, model_kwargs = load_paper_model(fold=0)
     occupations, found_valid = find_root(params, solvents, anions, PAPER_Z, **model_kwargs)

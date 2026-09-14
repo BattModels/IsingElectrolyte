@@ -192,7 +192,7 @@ def initialize_params(
     random_seed=42,
     param_sizes=None,
 ):
-    """Initialize the parameter dict for the Ising LHCE model.
+    """Initialize the parameter dict for the Ising electrolyte model.
 
     Args:
         mode:        "from_scratch" or "from_file". Default (None): "from_file" if
@@ -263,7 +263,7 @@ def initialize_params(
                 "It was likely saved with the legacy interface which used 'params_salt' (5 elements). "
                 "Please re-initialize from scratch with initialize_params(mode='from_scratch'). "
                 "To make predictions with the published model, use "
-                "IsingLHCE.pretrained.load_paper_model() instead."
+                "IsingElectrolyte.pretrained.load_paper_model() instead."
             )
         # add random noise to the loaded params (sizes come from the checkpoint)
         key = random.PRNGKey(random_seed)

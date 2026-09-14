@@ -1,6 +1,6 @@
-# IsingLHCE Package Tutorial
+# IsingElectrolyte Package Tutorial
 
-This document is a guided tour of the `IsingLHCE` package for someone who knows the old
+This document is a guided tour of the `IsingElectrolyte` package for someone who knows the old
 `fit_model.py` well. It explains what each part of the package does, how it maps to the
 old monolithic script, and when to use the legacy vs. new interface.
 
@@ -9,14 +9,14 @@ old monolithic script, and when to use the legacy vs. new interface.
 ## Package Layout
 
 ```
-src/IsingLHCE/
+src/IsingElectrolyte/
 ├── interactions.py        # primitive math functions + rescale companions
 ├── conc_vol_correction.py # concentration/volume correction (conc_factor)
 ├── model.py               # Ising physics: energetics, equations, find_root, free energy
 ├── train.py               # training loop: objective, update, train, parity_results
 └── analysis/              # plotting helpers (h-terms, J-terms, free energy, conc-vol viz)
 
-src/IsingLHCE/
+src/IsingElectrolyte/
 ├── pretrained.py          # load the 5 cross-validation models from the paper
 └── pretrained_models/     # their parameters (.npz)
 
@@ -136,10 +136,10 @@ occupations, found_valid = find_root(params, solvents, anions, z=1.86)
 > The anion-anion term then only ever appears as the self-interaction `j22`, so injecting
 > the old functional form reproduces it exactly (verified: `h` matches `energetics_old`
 > to 0.0). This is how the HCE and HEE studies reuse the trial-25 (paper) models, and
-> `IsingLHCE.pretrained.load_paper_model` packages exactly this recipe:
+> `IsingElectrolyte.pretrained.load_paper_model` packages exactly this recipe:
 >
 > ```python
-> from IsingLHCE.pretrained import load_paper_model, PAPER_Z
+> from IsingElectrolyte.pretrained import load_paper_model, PAPER_Z
 >
 > params, model_kwargs = load_paper_model(fold=0)
 > # model_kwargs = {"J_an_an_func": legacy_J_an_an,
@@ -277,12 +277,12 @@ input_params = rescale_input_params(input_params, monotonicity_dict={
 
 | Goal | Use |
 |------|-----|
-| Predict with the published model | `IsingLHCE.pretrained.load_paper_model` (see `examples/predict_solvation.py`) |
+| Predict with the published model | `IsingElectrolyte.pretrained.load_paper_model` (see `examples/predict_solvation.py`) |
 | Check the published CV accuracy | `examples/reproduce_paper_cv.py` |
 | Reproduce old `fit_model.py` results exactly | `examples/train_base_model.py` |
 | Train with new generic interface (YAML config) | `examples/train_lhce.py` + `config.yaml` |
-| Use physics in a notebook (old interface) | `from IsingLHCE.model import find_root_old, li_free_energy_old` |
-| Use physics in a notebook (new interface) | `from IsingLHCE.model import find_root, li_free_energy` |
+| Use physics in a notebook (old interface) | `from IsingElectrolyte.model import find_root_old, li_free_energy_old` |
+| Use physics in a notebook (new interface) | `from IsingElectrolyte.model import find_root, li_free_energy` |
 | Extend to 3 solvents or 2 anions | New interface only (`find_root`, `energetics`) |
 
 ---
@@ -349,7 +349,7 @@ python ../examples/train_base_model.py
 ```python
 import pickle
 import jax.numpy as jnp
-from IsingLHCE.model import find_root_old, li_free_energy_old
+from IsingElectrolyte.model import find_root_old, li_free_energy_old
 
 with open("trained_params.pkl", "rb") as f:
     params = pickle.load(f)
@@ -370,8 +370,8 @@ print(f"Solvent: {m:.3f}, Diluent: {n:.3f}, Anion: {l:.3f}, Valid: {found}")
 ### Use the new generic interface
 
 ```python
-from IsingLHCE.model import find_root
-from IsingLHCE.train import initialize_params
+from IsingElectrolyte.model import find_root
+from IsingElectrolyte.train import initialize_params
 
 params = initialize_params(mode="from_scratch", random_seed=42)   # untrained
 
@@ -405,7 +405,7 @@ This is useful for experimenting with different functional forms.
 
 ```python
 import jax.numpy as jnp
-from IsingLHCE.model import find_root
+from IsingElectrolyte.model import find_root
 
 def my_h_sol(dn_eff, x, params):
     """Custom field term — linear in effective DN."""

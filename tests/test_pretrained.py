@@ -7,9 +7,9 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from IsingLHCE.model import find_root, find_root_old
-from IsingLHCE.pretrained import N_FOLDS, PAPER_Z, load_paper_ensemble, load_paper_model
-from IsingLHCE.train import initialize_params
+from IsingElectrolyte.model import find_root, find_root_old
+from IsingElectrolyte.pretrained import N_FOLDS, PAPER_Z, load_paper_ensemble, load_paper_model
+from IsingElectrolyte.train import initialize_params
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "examples", "data", "lhce_md")
 
@@ -69,6 +69,6 @@ def test_initialize_params_defaults_to_from_scratch():
 
 
 def test_analysis_imports_without_author_filesystem():
-    import IsingLHCE.analysis as analysis
+    import IsingElectrolyte.analysis as analysis
 
     assert "DME" in analysis.solvent_map_dict

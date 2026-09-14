@@ -13,8 +13,8 @@ to Li+ ("free solvent").
 
 import numpy as np
 
-from IsingLHCE.model import find_root
-from IsingLHCE.pretrained import PAPER_Z, load_paper_ensemble
+from IsingElectrolyte.model import find_root
+from IsingElectrolyte.pretrained import PAPER_Z, load_paper_ensemble
 
 # Molecular descriptors
 #   dn, an : Gutmann donor / acceptor number (kcal/mol)

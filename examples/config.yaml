@@ -1,4 +1,4 @@
-# Ising LHCE training configuration
+# IsingElectrolyte training configuration
 # Run from the repository root:
 #   python examples/train_lhce.py examples/config.yaml
 #
@@ -24,7 +24,7 @@ lr_decay_steps:  1000
 lr_decay_rate:   0.95
 
 # --- Term-function overrides (optional) ---
-# Specify a function name from IsingLHCE.interactions to replace the default.
+# Specify a function name from IsingElectrolyte.interactions to replace the default.
 # Add your new function to interactions.py, then reference it by name here.
 # Omit a field (or set to null) to keep the package default.
 #
@@ -34,7 +34,7 @@ lr_decay_rate:   0.95
 # j_sol_an_func:  null   # default: sol_sol_func(dn_an, an_sol),   6 params
 # j_an_an_func:   null   # default: sol_sol_func(dn_i, dn_j),      6 params
 
-# --- Optional rescale function overrides (string names from IsingLHCE.interactions) ---
+# --- Optional rescale function overrides (string names from IsingElectrolyte.interactions) ---
 # These functions rescale the parameters through jnp.softplus to ensure desired monotonicity constraints.
 # Omit a field (or set to null) to keep the companion of the package default term function.
 #
