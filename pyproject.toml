@@ -32,8 +32,8 @@ dev = [
 
 [project.urls]
 paper = "https://arxiv.org/abs/2609.05671"
-repository = "https://github.com/hancheng2000/IsingElectrolyte"
-issues = "https://github.com/hancheng2000/IsingElectrolyte/issues"
+repository = "https://github.com/BattModels/IsingElectrolyte"
+issues = "https://github.com/BattModels/IsingElectrolyte/issues"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
