@@ -41,8 +41,8 @@ This repository contains:
 Requires Python ≥ 3.10.
 
 ```bash
-git clone https://github.com/hancheng2000/IsingLHCE.git
-cd IsingLHCE
+git clone https://github.com/hancheng2000/IsingElectrolyte.git
+cd IsingElectrolyte
 pip install -e .            # add ".[dev]" to also install pytest
 ```
 
@@ -308,4 +308,4 @@ If you use this code or data, please cite:
 ## License
 
 MIT — see [LICENSE](LICENSE). Questions and bug reports:
-[GitHub issues](https://github.com/hancheng2000/IsingLHCE/issues).
+[GitHub issues](https://github.com/hancheng2000/IsingElectrolyte/issues).
