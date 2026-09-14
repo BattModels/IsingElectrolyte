@@ -89,8 +89,7 @@ print(occupations)   # [DME, TTE, TFSI] share of the Li+ shell: ≈ [0.38, 0.00,
 | `volume` | molecular volume | Å³ per molecule |
 
 - **Mole fractions count Li⁺ as its own species.** For a salt LiA,
-  `x_solvent_1 + x_solvent_2 + … + x_anion + x_Li = 1` and `x_Li = x_anion`, so the
-  `x` values you pass sum to `1 − x_anion`. `examples/predict_solvation.py` shows how
+  `x_solvent_1 + x_solvent_2 + … + x_anion + x_Li = 1` and `x_Li = x_anion`. `examples/predict_solvation.py` shows how
   to convert salt molality and solvent:diluent ratio into these mole fractions.
 - `PAPER_Z = 1.86` is the mean-field coordination number (half of the MD average Li⁺
   coordination number, 3.72).
@@ -155,11 +154,7 @@ G = li_free_energy(params, solvents, anions, PAPER_Z, **model_kwargs)
   anion. Mixed-salt systems need a model retrained with the default anion–anion term
   (see below).
 
-The paper applies the LHCE-trained model to HCEs and HEEs without refitting; it
-reproduces the qualitative trends. Treat predictions far outside the training set
-(8 solvents, 3 salts, 0.2–2.5 m) with caution. Accuracy is also lower below ~0.5 m,
-likely because solvation there also depends on the dielectric constant, which the model
-does not include.
+Note: accuracy is lower below ~0.5 m, likely because solvation there also depends on the dielectric constant, which the model does not include at the moment.
 
 See [`docs/asymmetry-fix.md`](docs/asymmetry-fix.md) for how `groups` works.
 
