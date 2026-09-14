@@ -184,7 +184,7 @@ _HAND_TUNED_PARAMS = {
 
 
 def initialize_params(
-    mode="from_file",
+    mode=None,
     file_path=None,
     input_dim=1,
     hidden_dim=4,
@@ -192,10 +192,11 @@ def initialize_params(
     random_seed=42,
     param_sizes=None,
 ):
-    """Initialize the parameter dict for the Ising LHCE model.
+    """Initialize the parameter dict for the Ising electrolyte model.
 
     Args:
-        mode:        "from_scratch" or "from_file".
+        mode:        "from_scratch" or "from_file". Default (None): "from_file" if
+                     file_path is given, otherwise "from_scratch".
         file_path:   Required when mode="from_file". Path to a .pkl checkpoint.
         random_seed: PRNG seed for additive/multiplicative initialization noise.
         param_sizes: Optional dict mapping parameter names to custom array lengths.
@@ -213,6 +214,9 @@ def initialize_params(
         dict with keys: sol_params_dn, salt_params_dn, params_sol_salt_an,
         params_sol_sol, params_anion_anion, conc_factor_sol.
     """
+    if mode is None:
+        mode = "from_file" if file_path is not None else "from_scratch"
+
     if mode == "from_scratch":
         # Resolve effective sizes — default unless overridden by param_sizes.
         _sizes = dict(_DEFAULT_PARAM_SIZES)
@@ -234,7 +238,11 @@ def initialize_params(
         for i, name in enumerate(_DEFAULT_PARAM_SIZES):
             size = _sizes[name]
             base = _HAND_TUNED_PARAMS[name]
-            if base is not None and size == _DEFAULT_PARAM_SIZES[name]:
+            if name == "conc_factor_sol" and size == _DEFAULT_PARAM_SIZES[name]:
+                # Unperturbed, as in the paper's fit_model.py: entries reach ~±2000, so
+                # 5% multiplicative noise shifts them by ~±100 and the solver NaNs.
+                arr = base
+            elif base is not None and size == _DEFAULT_PARAM_SIZES[name]:
                 # Default size with hand-tuned starting point: multiplicative noise
                 arr = base * (1.0 + noise_scale * random.normal(keys[i], shape=base.shape))
             else:
@@ -253,7 +261,9 @@ def initialize_params(
             raise ValueError(
                 "The loaded checkpoint does not contain 'params_anion_anion'. "
                 "It was likely saved with the legacy interface which used 'params_salt' (5 elements). "
-                "Please re-initialize from scratch with initialize_params(mode='from_scratch')."
+                "Please re-initialize from scratch with initialize_params(mode='from_scratch'). "
+                "To make predictions with the published model, use "
+                "IsingElectrolyte.pretrained.load_paper_model() instead."
             )
         # add random noise to the loaded params (sizes come from the checkpoint)
         key = random.PRNGKey(random_seed)
@@ -265,6 +275,9 @@ def initialize_params(
                 keys[i], shape=arr.shape
             ))
         return init_params
+
+    else:
+        raise ValueError(f"mode must be 'from_scratch' or 'from_file', got {mode!r}")
 
 
 @partial(jax.jit, static_argnames=(

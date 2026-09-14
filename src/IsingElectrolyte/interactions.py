@@ -189,6 +189,19 @@ def default_J_an_an(dn_i, x_i, dn_j, x_j, params):
     )
 
 
+def legacy_J_an_an(dn_i, x_i, dn_j, x_j, params):
+    """Anion-anion J term of the published (paper) model.
+
+    The paper checkpoints were fitted with this form (stored under the legacy key
+    ``params_salt``). It depends on species i only, so it is exact for a single
+    anion (M=1), where J(anion-anion) only appears as the self term. Do not use
+    it with M >= 2.
+
+    params: 5 elements — expfunc[:4] of anion DN + logfunc[4] of anion molar ratio.
+    """
+    return expfunc(dn_i, params[:4]) + logfunc(x_i, params[4])
+
+
 # ---------------------------------------------------------------------------
 # Companion rescaling functions
 #
@@ -272,6 +285,15 @@ def default_J_an_an_rescale(params, monotonicity):
     else:
         signs = jnp.zeros(6, dtype=int)
     return _apply_softplus(params, signs)
+
+
+def legacy_J_an_an_rescale(params, monotonicity):
+    """Rescaling for legacy_J_an_an — 5 params: expfunc[:4] + logfunc[4].
+
+    Always applies the sign pattern the paper model was trained with
+    (``rescale_input_params_old``); ``monotonicity`` is ignored.
+    """
+    return _apply_softplus(params, jnp.array([0, +1, +1, +1, -1]))
 
 
 def default_conc_factor_rescale(params, monotonicity):

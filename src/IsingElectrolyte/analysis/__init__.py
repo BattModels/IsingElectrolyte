@@ -1,3 +1,5 @@
+import os
+
 import pandas as pd
 from matplotlib import rcParams
 
@@ -28,7 +30,14 @@ plot_settings = {
 
 rcParams.update(plot_settings)
 
-solvent_map_dict = pd.read_csv('/nfs/turbo/coe-venkvis/zhaohc/ising-electrolyte/volume-dft/solvent_map_dict.csv').set_index('molecule').to_dict(orient='index')
+# DN, AN (Gutmann, kcal/mol) and DFT molecular volume (A^3) for the solvents and
+# anions used in the paper, keyed by molecule name.
+_DATA_DIR = os.path.dirname(__file__)
+solvent_map_dict = (
+    pd.read_csv(os.path.join(_DATA_DIR, "solvent_map_dict.csv"))
+    .set_index("molecule")
+    .to_dict(orient="index")
+)
 
 from .h_terms import (
     sol_dn_func_contour,

@@ -1,4 +1,4 @@
-# Structure of IsingLHCE code
+# Structure of IsingElectrolyte code
 ## interactions.py
 Includes helper functions for defining interaction terms.
 - mlp: Multi-layer perceptron for modeling interactions.
@@ -6,6 +6,8 @@ Includes helper functions for defining interaction terms.
 - linearfunc: Linear function for modeling interactions.
 - expfunc: Sigmoid-based function for modeling interactions. Default for modeling Li-sol and Li-anion enthalpic interactions.
 - logfunc: Log function for modeling interactions, default for modeling Li-sol and Li-anion entropic interactions.
+- default_h_sol, default_h_an, default_J_sol_sol, default_J_sol_an, default_J_an_an: default term functions injected into the model, each with a `*_rescale` companion enforcing monotonicity.
+- legacy_J_an_an, legacy_J_an_an_rescale: anion-anion term of the paper model (exact for a single anion).
 - polynomialfunc: Polynomial function for modeling interactions.
 ## conc_vol_correction.py
 Includes helper functions for correcting for concentration and volume effects in the model.
@@ -14,9 +16,9 @@ Includes helper functions for correcting for concentration and volume effects in
 - conc_factor_power: Power function, multiplication of two power functions, one for concentration and one for volume.
 - conc_factor_wrapped_sigmoid: Sigmoid-based function, lumps concentration and volume into a single sigmoid function.
 ## model.py
-Includes the building of the IsingLHCE model.
+Includes the building of the IsingElectrolyte model.
 - rescale_input_params: Rescales input parameters to ensure monotonicity, optional.
-- energetics: Builds the IsingLHCE model and calculates the energetics of the system. This function is organized as follows:
+- energetics: Builds the IsingElectrolyte model and calculates the energetics of the system. This function is organized as follows:
     - unwrap input parameters.
     - unwrap input constants, including molecular properties (DN, AN, concentration, volume) and coordination number of Li.
     - calculate effective DN, AN by incorporating concentration and volume effects using the functions in conc_vol_correction.py.
@@ -27,15 +29,20 @@ Includes the building of the IsingLHCE model.
 - find_root: uses a Broyden solver to find the root of the equations.
 - get_root_error: calculates how far the root found by the Broyden solver is by calculating f(n) - n vs 0.
 ## train.py
-Includes training functions for the IsingLHCE model.
+Includes training functions for the IsingElectrolyte model.
 <!-- - dn_loss: Loss function for training the model, using root mean squared error between predicted and true Li+ coordination numbers. -->
 - objective_single: objective function for single data point, using root mean squared error between predicted and true Li+ coordination numbers. returns both the loss and new initial guess for the next solving step.
 - total_objective: jnp vectorized version of objective_single, for training on multiple data points.
-- initialize_params: initializes the parameters of the model, including interaction parameters and concentration/volume correction parameters. Two modes: "from_scratch", which initializes parameters from pre-defined ranges, and "from_file", which initializes parameters from a saved pkl file.
+- initialize_params: initializes the parameters of the model, including interaction parameters and concentration/volume correction parameters. Two modes: "from_scratch", which initializes parameters from pre-defined ranges, and "from_file", which initializes parameters from a saved pkl file. With no mode given it uses "from_file" if file_path is set, otherwise "from_scratch".
 - update: update function for training
 - train: main training loop for the model, which iteratively updates the parameters using the objective function and a specified optimizer.
 - parity_results: function for calculating parity results, which compares predicted and true Li+ coordination numbers and returns a dataframe with true values and predicted values.
-## analysis.py
+## pretrained.py
+Loads the five 5-fold cross-validation models from the paper (arXiv:2609.05671), stored in `pretrained_models/`.
+- load_paper_model(fold): returns (params, model_kwargs); pass both to find_root / li_free_energy.
+- load_paper_ensemble(): all five models plus the shared model_kwargs.
+- PAPER_Z, PAPER_MONOTONICITY, N_FOLDS: constants the paper model was trained with.
+## analysis/
 Includes helper functions for post-processing the results of the model.
 - sol_dn_func_contour: function for plotting h(Li-sol) as a function of solvent DN and concentration, for a given set of parameters.
 - sol_dn_func_data_to_csv: function for calculating h(Li-sol) for a given set of parameters and saving the results to a csv file.
@@ -68,18 +75,21 @@ Includes helper functions for post-processing the results of the model.
 
 ## Code Structure
 ```
-src/IsingLHCE/
+src/IsingElectrolyte/
 ├── __init__.py
 ├── interactions.py
 ├── conc_vol_correction.py
 ├── model.py
 ├── train.py
+├── pretrained.py
+├── pretrained_models/        # paper_fold{0..4}.npz
 ├── analysis/
 │   ├── __init__.py
 │   ├── h_terms.py
 │   ├── j_terms.py
 │   ├── free_energy.py
-│   └── conc_vol_viz.py
-├── readme.md
-└── ref_params.pkl
+│   ├── conc_vol_viz.py
+│   ├── solvent_map_dict.csv  # DN, AN, DFT volume of the molecules used in the paper
+│   └── DN_trade_offs.csv     # experimental Li/Li+ half-wave potentials vs DN
+└── readme.md
 ```

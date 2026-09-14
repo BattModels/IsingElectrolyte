@@ -1,15 +1,16 @@
-"""Train the Ising LHCE model on a 2-solvent + 1-anion dataset.
+"""Train the Ising electrolyte model on a 2-solvent + 1-anion dataset.
 
 Usage
 -----
-# Via YAML config (recommended):
-    python examples/train_lhce.py config.yaml
+# Via YAML config (recommended), from the repository root:
+    python examples/train_lhce.py examples/config.yaml
 
 # Via CLI flags:
-    python examples/train_lhce.py --train data/train.csv --val data/val.csv --test data/test.csv
+    python examples/train_lhce.py --train examples/data/lhce_md/fold_0/train.csv \
+        --val examples/data/lhce_md/fold_0/val.csv --test examples/data/lhce_md/fold_0/test.csv
 
 # CLI flags override YAML when both are supplied:
-    python examples/train_lhce.py config.yaml --epochs 500 --trials 3
+    python examples/train_lhce.py examples/config.yaml --epochs 500 --trials 3
 
 Config fields (YAML keys = long CLI flag names)
 -----------------------------------------------
@@ -20,24 +21,24 @@ Config fields (YAML keys = long CLI flag names)
     trials          Number of random-seed trials   (default: 10)
     seed            Base random seed               (default: 42)
     checkpoint      Output path for best params    (default: trained_params.pkl)
-    learning_rate   Initial Adam LR                (default: 0.01)
-    lr_decay_steps  Exponential decay steps        (default: 100)
-    lr_decay_rate   Exponential decay rate         (default: 0.99)
+    learning_rate   Initial Adam LR                (default: 0.002)
+    lr_decay_steps  Exponential decay steps        (default: 1000)
+    lr_decay_rate   Exponential decay rate         (default: 0.95)
 
-    # Optional — term function overrides (string names from IsingLHCE.interactions)
+    # Optional — term function overrides (string names from IsingElectrolyte.interactions)
     h_sol_func      Name of h(Li-sol) function     (default: package default)
     h_an_func       Name of h(Li-anion) function   (default: package default)
     j_sol_sol_func  Name of J(sol-sol) function    (default: package default)
     j_sol_an_func   Name of J(sol-anion) function  (default: package default)
     j_an_an_func    Name of J(anion-anion) function(default: package default)
 
-    # Optional - rescale parameter function overrides (string names from IsingLHCE.interactions)
-    rescale_h_sol          Name of h(Li-sol) rescale function       (default: None)
-    rescale_h_an           Name of h(Li-anion) rescale function     (default: None)
-    rescale_J_sol_sol      Name of J(sol-sol) rescale function      (default: None)
-    rescale_J_sol_an       Name of J(sol-anion) rescale function    (default: None)
-    rescale_J_an_an        Name of J(anion-anion) rescale function  (default: None)
-    rescale_conc_factor    Name of concentration rescale function   (default: None)
+    # Optional - rescale parameter function overrides (string names from IsingElectrolyte.interactions)
+    rescale_h_sol          Name of h(Li-sol) rescale function       (default: package default)
+    rescale_h_an           Name of h(Li-anion) rescale function     (default: package default)
+    rescale_J_sol_sol      Name of J(sol-sol) rescale function      (default: package default)
+    rescale_J_sol_an       Name of J(sol-anion) rescale function    (default: package default)
+    rescale_J_an_an        Name of J(anion-anion) rescale function  (default: package default)
+    rescale_conc_factor    Name of concentration rescale function   (default: package default)
 
     # Optional - monotonicity constraint dict
     monotonicity_dict      Dict mapping param keys to "increase"/"decrease".
@@ -66,14 +67,17 @@ import optax
 import pandas as pd
 import yaml
 
-import IsingLHCE.interactions as _interactions
-import IsingLHCE.train as ising_train
-from IsingLHCE.interactions import (
+import IsingElectrolyte.interactions as _interactions
+import IsingElectrolyte.train as ising_train
+from IsingElectrolyte.interactions import (
     default_h_sol, default_h_an,
     default_J_sol_sol, default_J_sol_an, default_J_an_an,
+    default_h_sol_rescale, default_h_an_rescale,
+    default_J_sol_sol_rescale, default_J_sol_an_rescale, default_J_an_an_rescale,
+    default_conc_factor_rescale,
 )
-from IsingLHCE.model import DEFAULT_MONOTONICITY
-from IsingLHCE.train import initialize_params, train, parity_results
+from IsingElectrolyte.model import DEFAULT_MONOTONICITY
+from IsingElectrolyte.train import initialize_params, train, parity_results
 
 
 # ---------------------------------------------------------------------------
@@ -86,7 +90,7 @@ def _resolve_func(spec, default):
     Args:
         spec:    None    → return ``default`` (package default)
                  callable → return as-is (function defined anywhere)
-                 str      → look up by name from ``IsingLHCE.interactions``
+                 str      → look up by name from ``IsingElectrolyte.interactions``
                             (add your new function there; no import needed here)
         default: fallback callable when spec is None
 
@@ -94,7 +98,7 @@ def _resolve_func(spec, default):
         A JAX-traceable callable matching the relevant signature contract.
 
     Raises:
-        ValueError: if ``spec`` is a string not found in IsingLHCE.interactions
+        ValueError: if ``spec`` is a string not found in IsingElectrolyte.interactions
         TypeError:  if ``spec`` is not None, callable, or str
     """
     if spec is None:
@@ -105,7 +109,7 @@ def _resolve_func(spec, default):
         fn = getattr(_interactions, spec, None)
         if fn is None:
             raise ValueError(
-                f"No function named {spec!r} found in IsingLHCE.interactions. "
+                f"No function named {spec!r} found in IsingElectrolyte.interactions. "
                 "Define it there and reinstall the package (pip install -e .)."
             )
         return fn
@@ -127,13 +131,13 @@ def _resolve_func(spec, default):
 # Three ways to specify each slot:
 #   None       — use the package default (no change needed)
 #   callable   — a function defined below or imported above
-#   str        — name of a function in IsingLHCE.interactions
+#   str        — name of a function in IsingElectrolyte.interactions
 #                (add it there, no import needed here; same name works in config.yaml)
 #
 # Examples:
 #   H_AN_FUNC = "my_new_h_an"            # define my_new_h_an in interactions.py
 #
-#   from IsingLHCE.interactions import langmuirfunc
+#   from IsingElectrolyte.interactions import langmuirfunc
 #   def my_h_sol(dn_eff, x, params): return langmuirfunc(dn_eff, params)
 #   H_SOL_FUNC = my_h_sol
 #
@@ -208,16 +212,16 @@ DEFAULTS = {
     "trials":          10,
     "seed":            42,
     "checkpoint":      "trained_params.pkl",
-    "learning_rate":   1e-2,
-    "lr_decay_steps":  100,
-    "lr_decay_rate":   0.99,
-    # Optional term-function overrides (string names from IsingLHCE.interactions)
+    "learning_rate":   2e-3,
+    "lr_decay_steps":  1000,
+    "lr_decay_rate":   0.95,
+    # Optional term-function overrides (string names from IsingElectrolyte.interactions)
     "h_sol_func":      None,
     "h_an_func":       None,
     "j_sol_sol_func":  None,
     "j_sol_an_func":   None,
     "j_an_an_func":    None,
-    # Optional rescale function overrides (string names from IsingLHCE.interactions)
+    # Optional rescale function overrides (string names from IsingElectrolyte.interactions)
     "rescale_h_sol":      None,
     "rescale_h_an":       None,
     "rescale_J_sol_sol":  None,
@@ -239,7 +243,7 @@ def _load_config(argv):
     Priority (highest to lowest): CLI flags > YAML file > defaults.
     """
     parser = argparse.ArgumentParser(
-        description="Train Ising LHCE model",
+        description="Train Ising electrolyte model",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument("yaml_config", nargs="?", default=None,
@@ -254,30 +258,30 @@ def _load_config(argv):
     parser.add_argument("--learning_rate",  type=float, default=None)
     parser.add_argument("--lr_decay_steps", type=int,   default=None)
     parser.add_argument("--lr_decay_rate",  type=float, default=None)
-    # Term-function overrides: string names looked up in IsingLHCE.interactions
+    # Term-function overrides: string names looked up in IsingElectrolyte.interactions
     parser.add_argument("--h_sol_func",     default=None,
-                        help="Name of h(Li-sol) function in IsingLHCE.interactions")
+                        help="Name of h(Li-sol) function in IsingElectrolyte.interactions")
     parser.add_argument("--h_an_func",      default=None,
-                        help="Name of h(Li-anion) function in IsingLHCE.interactions")
+                        help="Name of h(Li-anion) function in IsingElectrolyte.interactions")
     parser.add_argument("--j_sol_sol_func", default=None,
-                        help="Name of J(sol-sol) function in IsingLHCE.interactions")
+                        help="Name of J(sol-sol) function in IsingElectrolyte.interactions")
     parser.add_argument("--j_sol_an_func",  default=None,
-                        help="Name of J(sol-anion) function in IsingLHCE.interactions")
+                        help="Name of J(sol-anion) function in IsingElectrolyte.interactions")
     parser.add_argument("--j_an_an_func",   default=None,
-                        help="Name of J(anion-anion) function in IsingLHCE.interactions")
-    # Rescale function overrides: string names looked up in IsingLHCE.interactions
+                        help="Name of J(anion-anion) function in IsingElectrolyte.interactions")
+    # Rescale function overrides: string names looked up in IsingElectrolyte.interactions
     parser.add_argument("--rescale_h_sol",      default=None,
-                        help="Name of h(Li-sol) rescale function in IsingLHCE.interactions")
+                        help="Name of h(Li-sol) rescale function in IsingElectrolyte.interactions")
     parser.add_argument("--rescale_h_an",       default=None,
-                        help="Name of h(Li-anion) rescale function in IsingLHCE.interactions")
+                        help="Name of h(Li-anion) rescale function in IsingElectrolyte.interactions")
     parser.add_argument("--rescale_J_sol_sol",  default=None,
-                        help="Name of J(sol-sol) rescale function in IsingLHCE.interactions")
+                        help="Name of J(sol-sol) rescale function in IsingElectrolyte.interactions")
     parser.add_argument("--rescale_J_sol_an",   default=None,
-                        help="Name of J(sol-anion) rescale function in IsingLHCE.interactions")
+                        help="Name of J(sol-anion) rescale function in IsingElectrolyte.interactions")
     parser.add_argument("--rescale_J_an_an",    default=None,
-                        help="Name of J(anion-anion) rescale function in IsingLHCE.interactions")
+                        help="Name of J(anion-anion) rescale function in IsingElectrolyte.interactions")
     parser.add_argument("--rescale_conc_factor", default=None,
-                        help="Name of concentration factor rescale function in IsingLHCE.interactions")
+                        help="Name of concentration factor rescale function in IsingElectrolyte.interactions")
 
     args = parser.parse_args(argv)
 
@@ -383,24 +387,24 @@ def main(argv=None):
     # Resolve rescale functions (optional)
     # Script-level CUSTOMIZATION values take precedence over YAML/CLI strings.
     # -------------------------------------------------------------------
-    rescale_h_sol      = _resolve_func(RESCALE_H_SOL      or cfg.get("rescale_h_sol"),      None)
-    rescale_h_an       = _resolve_func(RESCALE_H_AN       or cfg.get("rescale_h_an"),       None)
-    rescale_J_sol_sol     = _resolve_func(RESCALE_J_SOL_SOL  or cfg.get("rescale_J_sol_sol"),  None)
-    rescale_J_sol_an      = _resolve_func(RESCALE_J_SOL_AN   or cfg.get("rescale_J_sol_an"),   None)
-    rescale_J_an_an       = _resolve_func(RESCALE_J_AN_AN    or cfg.get("rescale_J_an_an"),    None)
-    rescale_conc_factor   = _resolve_func(RESCALE_CONC_FACTOR or cfg.get("rescale_conc_factor"), None)
+    rescale_h_sol      = _resolve_func(RESCALE_H_SOL      or cfg.get("rescale_h_sol"),      default_h_sol_rescale)
+    rescale_h_an       = _resolve_func(RESCALE_H_AN       or cfg.get("rescale_h_an"),       default_h_an_rescale)
+    rescale_J_sol_sol     = _resolve_func(RESCALE_J_SOL_SOL  or cfg.get("rescale_J_sol_sol"),  default_J_sol_sol_rescale)
+    rescale_J_sol_an      = _resolve_func(RESCALE_J_SOL_AN   or cfg.get("rescale_J_sol_an"),   default_J_sol_an_rescale)
+    rescale_J_an_an       = _resolve_func(RESCALE_J_AN_AN    or cfg.get("rescale_J_an_an"),    default_J_an_an_rescale)
+    rescale_conc_factor   = _resolve_func(RESCALE_CONC_FACTOR or cfg.get("rescale_conc_factor"), default_conc_factor_rescale)
 
     # -------------------------------------------------------------------
     # Resolve monotonicity dict
     # Priority: script-level MONOTONICITY_DICT > YAML > package default
     # None at any level → fall through to the next; final fallback is
-    # DEFAULT_MONOTONICITY (from IsingLHCE.model).
+    # DEFAULT_MONOTONICITY (from IsingElectrolyte.model).
     # {} means "disable all constraints" and is passed through as-is.
     # -------------------------------------------------------------------
     _mono_raw = MONOTONICITY_DICT if MONOTONICITY_DICT is not None else cfg["monotonicity_dict"]
     monotonicity_dict = _mono_raw if _mono_raw is not None else DEFAULT_MONOTONICITY
 
-    print("=== Ising LHCE Training ===")
+    print("=== IsingElectrolyte Training ===")
     print(f"  train:    {cfg['train']}")
     print(f"  val:      {cfg['val']}")
     print(f"  test:     {cfg['test']}")

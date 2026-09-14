@@ -1,7 +1,7 @@
 """
-Replication of the original fit_model.py using the IsingLHCE package.
+Replication of the original fit_model.py using the IsingElectrolyte package.
 
-Physics backend: IsingLHCE.model.*_old functions, which preserve the original
+Physics backend: IsingElectrolyte.model.*_old functions, which preserve the original
 2-solvent + 1-anion formulation with params_salt (5 elem, expfunc-based j22)
 and hard-coded monotonicity constraints — identical to the legacy fit_model.py.
 
@@ -22,7 +22,7 @@ import time
 from jax import random
 from functools import partial
 
-from IsingLHCE.model import (
+from IsingElectrolyte.model import (
     find_root_old,
     li_free_energy_old,
 )
@@ -109,6 +109,11 @@ def initialize_params_old(mode="from_scratch", file_path=None, random_seed=42):
         init_params = {}
         for i, name in enumerate(_KEY_ORDER):
             base = _HAND_TUNED[name]
+            if name == "conc_factor_sol":
+                # fit_model.py leaves this unperturbed: its entries reach ~±2000, so
+                # 5% multiplicative noise shifts them by ~±100 and the solver NaNs.
+                init_params[name] = base
+                continue
             init_params[name] = base * (1.0 + noise_scale * random.normal(
                 keys[i], shape=base.shape
             ))

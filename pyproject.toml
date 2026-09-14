@@ -1,29 +1,28 @@
 [build-system]
-requires = ["setuptools"]
+requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "IsingLHCE"        # what pip install sees
+name = "IsingElectrolyte"
 version = "0.1.0"
-description = "Tools for fitting an Ising model for LHCE design"
+description = "Differentiable mean-field Ising model of Li+ solvation shell composition for electrolyte design"
 authors = [
   { name = "Hancheng Zhao", email = "zhaohc@umich.edu" }
 ]
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "MIT" } 
+license = { text = "MIT" }
+keywords = ["electrolyte", "solvation", "Ising model", "JAX", "lithium battery", "LHCE"]
 
-# Your runtime dependencies (example)
 dependencies = [
   "jax",
+  "jaxopt",
   "optax",
   "numpy",
   "pandas",
-  "scipy",
   "matplotlib",
-  "jaxopt",
-  "scikit-learn",
   "tqdm",
+  "pyyaml",
 ]
 
 [project.optional-dependencies]
@@ -32,11 +31,15 @@ dev = [
 ]
 
 [project.urls]
-repository="https://github.com/hancheng2000/IsingLHCE.git"
-issues="https://github.com/hancheng2000/IsingLHCE/issues"
+paper = "https://arxiv.org/abs/2609.05671"
+repository = "https://github.com/hancheng2000/IsingElectrolyte"
+issues = "https://github.com/hancheng2000/IsingElectrolyte/issues"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+IsingElectrolyte = ["pretrained_models/*.npz", "analysis/*.csv"]
