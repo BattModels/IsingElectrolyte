@@ -1,7 +1,7 @@
-"""Train the Ising LHCE model with dielectric-constant-dependent interaction terms.
+"""Train the Ising electrolyte model with dielectric-constant-dependent interaction terms.
 
 This script demonstrates how to plug in the new ``h_anion_conc_step`` and
-``J_anion_anion_conc_step`` functions (from ``IsingLHCE.interactions``) that
+``J_anion_anion_conc_step`` functions (from ``IsingElectrolyte.interactions``) that
 account for the dielectric constant of the anion's local environment.
 
 Key differences from ``train_lhce.py``
@@ -35,10 +35,10 @@ import numpy as np
 import optax
 import pandas as pd
 
-import IsingLHCE.train as ising_train
-from IsingLHCE.train import initialize_params, train, parity_results
-from IsingLHCE.model import DEFAULT_MONOTONICITY
-from IsingLHCE.interactions import (
+import IsingElectrolyte.train as ising_train
+from IsingElectrolyte.train import initialize_params, train, parity_results
+from IsingElectrolyte.model import DEFAULT_MONOTONICITY
+from IsingElectrolyte.interactions import (
     default_h_sol,
     h_anion_conc_step,
     h_anion_conc_step_rescale,
@@ -188,7 +188,7 @@ def main():
     # ------------------------------------------------------------------
     monotonicity_dict = MONOTONICITY_DICT if MONOTONICITY_DICT is not None else DEFAULT_MONOTONICITY
 
-    print("=== Ising LHCE Training — Dielectric Experiment ===")
+    print("=== IsingElectrolyte Training — Dielectric Experiment ===")
     print(f"  h_anion_func:          {H_ANION_FUNC.__name__}")
     print(f"  J_anion_anion_func:    {J_ANION_ANION_FUNC.__name__}")
     print(f"  rescale_h_anion:       {RESCALE_H_ANION.__name__}")

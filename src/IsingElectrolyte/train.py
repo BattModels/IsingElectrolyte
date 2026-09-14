@@ -191,7 +191,7 @@ def initialize_params(
     random_seed=42,
     param_sizes=None,
 ):
-    """Initialize the parameter dict for the Ising LHCE model.
+    """Initialize the parameter dict for the Ising electrolyte model.
 
     Args:
         mode:        "from_scratch" or "from_file".

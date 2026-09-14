@@ -1,6 +1,6 @@
-# IsingLHCE Package Tutorial
+# IsingElectrolyte Package Tutorial
 
-This document is a guided tour of the `IsingLHCE` package for someone who knows the old
+This document is a guided tour of the `IsingElectrolyte` package for someone who knows the old
 `fit_model.py` well. It explains what each part of the package does, how it maps to the
 old monolithic script, and when to use the legacy vs. new interface.
 
@@ -9,7 +9,7 @@ old monolithic script, and when to use the legacy vs. new interface.
 ## Package Layout
 
 ```
-src/IsingLHCE/
+src/IsingElectrolyte/
 ├── interactions.py        # primitive math functions + rescale companions
 ├── conc_vol_correction.py # concentration/volume correction (conc_factor)
 ├── model.py               # Ising physics: energetics, equations, find_root, free energy
@@ -130,7 +130,7 @@ occupations, found_valid = find_root(params, solvents, anions, z=1.86)
 > to 0.0). This is how the HCE and HEE studies reuse the trial-25 models:
 >
 > ```python
-> from IsingLHCE.interactions import expfunc, logfunc, _apply_softplus
+> from IsingElectrolyte.interactions import expfunc, logfunc, _apply_softplus
 >
 > def old_J_anion_anion(props_i, props_j, p):         # legacy j22
 >     return expfunc(props_i["dn"], p[:4]) + logfunc(props_i["x"], p[4])
@@ -271,8 +271,8 @@ input_params = rescale_input_params(input_params, monotonicity_dict={
 |------|-----|
 | Reproduce old `fit_model.py` results exactly | `examples/train_base_model.py` |
 | Train with new generic interface (YAML config) | `examples/train_lhce.py` + `config.yaml` |
-| Use physics in a notebook (old interface) | `from IsingLHCE.model import find_root_old, li_free_energy_old` |
-| Use physics in a notebook (new interface) | `from IsingLHCE.model import find_root, li_free_energy` |
+| Use physics in a notebook (old interface) | `from IsingElectrolyte.model import find_root_old, li_free_energy_old` |
+| Use physics in a notebook (new interface) | `from IsingElectrolyte.model import find_root, li_free_energy` |
 | Extend to 3 solvents or 2 anions | New interface only (`find_root`, `energetics`) |
 
 ---
@@ -328,7 +328,7 @@ trials. After training, saves:
 
 ```bash
 cd /path/to/trial-25/base-model
-python /path/to/IsingLHCE/examples/train_base_model.py
+python /path/to/IsingElectrolyte/examples/train_base_model.py
 ```
 
 ### Load a trained checkpoint and inspect predictions
@@ -336,7 +336,7 @@ python /path/to/IsingLHCE/examples/train_base_model.py
 ```python
 import pickle
 import jax.numpy as jnp
-from IsingLHCE.model import find_root_old, li_free_energy_old
+from IsingElectrolyte.model import find_root_old, li_free_energy_old
 
 with open("trained_params.pkl", "rb") as f:
     params = pickle.load(f)
@@ -357,8 +357,8 @@ print(f"Solvent: {m:.3f}, Diluent: {n:.3f}, Anion: {l:.3f}, Valid: {found}")
 ### Use the new generic interface
 
 ```python
-from IsingLHCE.model import find_root
-from IsingLHCE.train import initialize_params
+from IsingElectrolyte.model import find_root
+from IsingElectrolyte.train import initialize_params
 
 params = initialize_params(mode="from_scratch", random_seed=42)
 
@@ -392,7 +392,7 @@ This is useful for experimenting with different functional forms.
 
 ```python
 import jax.numpy as jnp
-from IsingLHCE.model import find_root
+from IsingElectrolyte.model import find_root
 
 def my_h_sol(props, params):
     """Custom field term — linear in DN."""

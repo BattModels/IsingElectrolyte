@@ -1,4 +1,4 @@
-# Ising LHCE training configuration — dielectric-constant experiment
+# IsingElectrolyte training configuration — dielectric-constant experiment
 # Run with: python examples/train_lhce.py examples/config_dielectric.yaml
 #
 # Uses h_anion_conc_step and J_anion_anion_conc_step, which gate the

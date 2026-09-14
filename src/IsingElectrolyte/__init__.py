@@ -1,5 +1,5 @@
 """
-IsingLHCE: A Python package fitting an Ising model to design LHCE.
+IsingElectrolyte: A Python package fitting an Ising model to design LHCE.
 """
 
 __all__ = [

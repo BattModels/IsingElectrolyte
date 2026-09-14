@@ -16,8 +16,8 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
-from IsingLHCE.model import energetics, energetics_old, find_root, symmetrize_pair_block
-from IsingLHCE.interactions import _apply_softplus, expfunc, logfunc
+from IsingElectrolyte.model import energetics, energetics_old, find_root, symmetrize_pair_block
+from IsingElectrolyte.interactions import _apply_softplus, expfunc, logfunc
 
 # --- the trial-25 parameter layout uses the legacy `params_salt` key ----------
 # Its anion-anion term has a different functional form from the generic
