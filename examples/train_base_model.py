@@ -69,7 +69,7 @@ def initialize_params_old(mode="from_scratch", file_path=None, random_seed=42):
     Param keys: sol_params_dn(5), salt_params_dn(5), params_sol_salt_an(6),
                 params_sol_sol(16), params_salt(5), conc_factor_sol(8).
     """
-    _HAND_TUNED = {
+    _DEFAULT_PARAMS = {
         "sol_params_dn": jnp.array([
             -1.4226977825164795, 0.6868864893913269, -1.29103684425354,
             -2.2087085247039795, -2.837172,
@@ -100,7 +100,7 @@ def initialize_params_old(mode="from_scratch", file_path=None, random_seed=42):
             -6.164828777313232, 2.281510829925537,
         ]),
     }
-    _KEY_ORDER = list(_HAND_TUNED.keys())
+    _KEY_ORDER = list(_DEFAULT_PARAMS.keys())
     noise_scale = 0.05
 
     if mode == "from_scratch":
@@ -108,7 +108,7 @@ def initialize_params_old(mode="from_scratch", file_path=None, random_seed=42):
         keys = random.split(key, num=len(_KEY_ORDER))
         init_params = {}
         for i, name in enumerate(_KEY_ORDER):
-            base = _HAND_TUNED[name]
+            base = _DEFAULT_PARAMS[name]
             if name == "conc_factor_sol":
                 # fit_model.py leaves this unperturbed: its entries reach ~±2000, so
                 # 5% multiplicative noise shifts them by ~±100 and the solver NaNs.

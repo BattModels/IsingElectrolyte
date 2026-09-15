@@ -51,7 +51,7 @@ lr_decay_rate:   0.95
 # listed below; they are also train_lhce.py's default without a config file.
 # Set individual keys to "decrease", "increase", or "none";
 # keys you do not list are unconstrained ("none").
-# Unconstrained groups start from the hand-tuned values as the constrained model
+# Unconstrained groups start from the default values as the constrained model
 # sees them (after the softplus), so training starts from the same physical model;
 # it can still diverge later, and diverged trials are discarded.
 #
@@ -91,7 +91,7 @@ monotonicity_dict:
 # If 'mode' is omitted, initialize_params() uses "from_file" when file_path is
 # given and "from_scratch" otherwise.
 # 'monotonicity_dict' defaults to the one above (picks the start for unconstrained
-# groups); set it to null to start every group from the raw hand-tuned values.
+# groups); set it to null to start every group from the raw default values.
 #
 initialize_params_kwargs:
   mode: from_scratch

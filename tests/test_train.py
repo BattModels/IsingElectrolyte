@@ -56,17 +56,17 @@ def test_initialize_params_is_reproducible():
     assert all(np.array_equal(a[k], b[k]) for k in a)
 
 
-def test_rescaled_start_values_match_hand_tuned(physical_monotonicity):
-    """The hard-coded unconstrained start is the hand-tuned start after the physical softplus."""
+def test_rescaled_start_values_match_default_params(physical_monotonicity):
+    """The hard-coded unconstrained start is the default start after the physical softplus."""
     from IsingElectrolyte import interactions as I
-    from IsingElectrolyte.train import _HAND_TUNED_PARAMS, _HAND_TUNED_PARAMS_RESCALED
+    from IsingElectrolyte.train import _DEFAULT_PARAMS, _DEFAULT_PARAMS_RESCALED
 
     rescale = {"sol_params_dn": I.default_h_sol_rescale, "salt_params_dn": I.default_h_an_rescale,
                "params_sol_salt_an": I.default_J_sol_an_rescale, "params_sol_sol": I.default_J_sol_sol_rescale,
                "conc_factor_sol": I.default_conc_factor_rescale}
     for key, fn in rescale.items():
-        expected = fn(_HAND_TUNED_PARAMS[key], physical_monotonicity[key])
-        np.testing.assert_allclose(np.asarray(_HAND_TUNED_PARAMS_RESCALED[key]), np.asarray(expected), rtol=1e-12, err_msg=key)
+        expected = fn(_DEFAULT_PARAMS[key], physical_monotonicity[key])
+        np.testing.assert_allclose(np.asarray(_DEFAULT_PARAMS_RESCALED[key]), np.asarray(expected), rtol=1e-12, err_msg=key)
 
 
 def test_constrained_start_is_unchanged(physical_monotonicity):

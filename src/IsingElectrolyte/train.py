@@ -140,7 +140,7 @@ def total_objective(
 
 
 #: Default number of elements in each trainable parameter array.
-#: Used by initialize_params to decide whether to apply hand-tuned initial
+#: Used by initialize_params to decide whether to apply DEFAULT initial
 #: values or zeros + noise when a custom size is requested via param_sizes=.
 _DEFAULT_PARAM_SIZES = {
     "sol_params_dn":      5,
@@ -151,9 +151,9 @@ _DEFAULT_PARAM_SIZES = {
     "conc_factor_sol":    8,
 }
 
-# Hand-tuned starting points for the default parameter sizes.
+# Default starting points for the default parameter sizes.
 # None signals "always zero-initialize" (additive noise only).
-_HAND_TUNED_PARAMS = {
+_DEFAULT_PARAMS = {
     "sol_params_dn": jnp.array([
         -1.4226977825164795, 0.6868864893913269, -1.29103684425354,
         -2.2087085247039795, -2.837172,
@@ -183,14 +183,14 @@ _HAND_TUNED_PARAMS = {
 }
 
 # The same starting points as the model actually uses them under the physical
-# constraints: _HAND_TUNED_PARAMS passed once through the default *_rescale functions
+# constraints: _DEFAULT_PARAMS passed once through the default *_rescale functions
 # ("decrease" for the h and solvent J terms, "increase" for conc_factor_sol).
 # The raw values above are only meaningful after that signed softplus; used directly
 # by unconstrained training they describe an unphysical model (wrong signs, entries
 # ~20x too large) and most formulations then have no valid root. Groups trained
 # without a constraint start from these values instead, so the unconstrained model
 # starts where the constrained one does. tests/test_train.py checks they stay in sync.
-_HAND_TUNED_PARAMS_RESCALED = {
+_DEFAULT_PARAMS_RESCALED = {
     "sol_params_dn": jnp.array([
         -1.4226977825164795, 1.0944428527198446, 0.24293482017207155,
         -0.10421803742400343, -0.056938899148670515,
@@ -240,7 +240,7 @@ def initialize_params(
         param_sizes: Optional dict mapping parameter names to custom array lengths.
                      Keys absent from param_sizes use their default size.
                      Arrays with a custom (non-default) size are initialized as
-                     zeros + noise because the hand-tuned values are only valid
+                     zeros + noise because the default values are only valid
                      for the default parameter semantics.
                      Example: {"params_sol_sol": 9, "sol_params_dn": 8}
                      Default sizes: sol_params_dn=5, salt_params_dn=5,
@@ -249,9 +249,9 @@ def initialize_params(
                      Ignored when mode="from_file" (sizes come from checkpoint).
         monotonicity_dict: The constraints you will train with (as passed to train()).
                      Default-sized groups set to "none" (or not listed) start from the
-                     hand-tuned values as the constrained model uses them
-                     (_HAND_TUNED_PARAMS_RESCALED), so unconstrained training starts
-                     from a physical model. Default None keeps the raw hand-tuned
+                     default values as the constrained model uses them
+                     (_DEFAULT_PARAMS_RESCALED), so unconstrained training starts
+                     from a physical model. Default None keeps the raw default
                      values for every group, which is right for constrained training.
                      Ignored when mode="from_file".
 
@@ -289,19 +289,19 @@ def initialize_params(
         init_params = {}
         for i, name in enumerate(_DEFAULT_PARAM_SIZES):
             size = _sizes[name]
-            base = (_HAND_TUNED_PARAMS_RESCALED if name in unconstrained else _HAND_TUNED_PARAMS)[name]
+            base = (_DEFAULT_PARAMS_RESCALED if name in unconstrained else _DEFAULT_PARAMS)[name]
             if name == "conc_factor_sol" and size == _DEFAULT_PARAM_SIZES[name]:
                 # Unperturbed, as in the paper's fit_model.py: entries reach ~±2000, so
                 # 5% multiplicative noise shifts them by ~±100 and the solver NaNs.
                 arr = base
             elif base is not None and size == _DEFAULT_PARAM_SIZES[name]:
-                # Default size with hand-tuned starting point: multiplicative noise
+                # Default size with default starting point: multiplicative noise
                 arr = base * (1.0 + noise_scale * random.normal(keys[i], shape=base.shape))
             else:
                 # Custom size or inherently zero-initialized: additive noise from zeros
                 arr = jnp.zeros(size) + noise_scale * random.normal(keys[i], shape=(size,))
                 if name == "params_anion_anion" and name in unconstrained and size == _DEFAULT_PARAM_SIZES[name]:
-                    # No hand-tuned values to hard-code: take what the constrained model
+                    # No default values to hard-code: take what the constrained model
                     # sees for this start ("increase" softplus); left raw, 2-56 of the 182
                     # formulations have no valid root for some seeds.
                     arr = default_J_an_an_rescale(arr, "increase")

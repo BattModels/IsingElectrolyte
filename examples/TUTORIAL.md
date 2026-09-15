@@ -350,7 +350,7 @@ binding gets stronger (h decreases) with DN. Each parameter group takes `"decrea
 a signed softplus, so the optimizer can never violate it. The package default is no
 constraints (`examples/train_lhce.py` defaults to the physical ones below).
 
-The hand-tuned starting values from `initialize_params` are written for that softplus. To
+The default starting values from `initialize_params` are written for that softplus. To
 train a group *without* a constraint, pass the same `monotonicity_dict` to `initialize_params`:
 groups set to `"none"` then start from the values the constrained model would see, instead of
 raw values that describe an unphysical model. These are the physically motivated constraints:

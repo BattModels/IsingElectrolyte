@@ -45,7 +45,7 @@ Config fields (YAML keys = long CLI flag names)
                            null/omitted → PHYSICAL_MONOTONICITY below (the same
                            constraints as examples/config.yaml).
                            {} → disable all constraints; keys not listed → "none".
-                           Unconstrained groups start from the hand-tuned values
+                           Unconstrained groups start from the default values
                            as the constrained model uses them (after the softplus),
                            unless initialize_params_kwargs sets a start.
 
@@ -466,7 +466,7 @@ def main(argv=None):
         ip_kwargs = dict(cfg["initialize_params_kwargs"])
         ip_kwargs.pop("random_seed", None)   # always per-trial, never user-overridable
         ip_kwargs["random_seed"] = trial_seed
-        # Unconstrained groups start from the rescaled hand-tuned values (see initialize_params).
+        # Unconstrained groups start from the rescaled default values (see initialize_params).
         ip_kwargs.setdefault("monotonicity_dict", monotonicity_dict)
         params = initialize_params(**ip_kwargs)
 
