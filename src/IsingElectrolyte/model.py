@@ -472,6 +472,8 @@ def rescale_input_params(
                            params_sol_salt_an, params_sol_sol,
                            params_anion_anion, conc_factor_sol).
         monotonicity_dict: frozenset from _freeze_mono(), or None → DEFAULT_MONOTONICITY.
+                           Parameter groups it does not mention fall back to
+                           DEFAULT_MONOTONICITY (no constraint).
         rescale_h_sol:     rescaling function for sol_params_dn.
         rescale_h_an:      rescaling function for salt_params_dn.
         rescale_J_sol_sol: rescaling function for params_sol_sol.
@@ -479,7 +481,7 @@ def rescale_input_params(
         rescale_J_an_an:   rescaling function for params_anion_anion.
         rescale_conc_factor: rescaling function for conc_factor_sol.
     """
-    mono = dict(monotonicity_dict) if monotonicity_dict is not None else DEFAULT_MONOTONICITY
+    mono = {**DEFAULT_MONOTONICITY, **dict(monotonicity_dict or {})}
     input_params["sol_params_dn"]      = rescale_h_sol(      input_params["sol_params_dn"],      mono["sol_params_dn"])
     input_params["salt_params_dn"]     = rescale_h_an(       input_params["salt_params_dn"],     mono["salt_params_dn"])
     input_params["params_sol_salt_an"] = rescale_J_sol_an(   input_params["params_sol_salt_an"], mono["params_sol_salt_an"])

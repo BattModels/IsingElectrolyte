@@ -41,9 +41,11 @@ Config fields (YAML keys = long CLI flag names)
     rescale_conc_factor    Name of concentration rescale function   (default: package default)
 
     # Optional - monotonicity constraint dict
-    monotonicity_dict      Dict mapping param keys to "increase"/"decrease".
-                           null/omitted → package DEFAULT_MONOTONICITY.
-                           {} → disable all constraints.
+    monotonicity_dict      Dict mapping param keys to "increase"/"decrease"/"none".
+                           null/omitted → PHYSICAL_MONOTONICITY below (the same
+                           constraints as examples/config.yaml; training without
+                           constraints usually diverges).
+                           {} → disable all constraints; keys not listed → "none".
 
 Expected CSV columns
 --------------------
@@ -164,35 +166,28 @@ RESCALE_CONC_FACTOR = None # default: increase with concentration and volume
 # ---------------------------------------------------------------------------
 # CUSTOMIZATION — override the monotonicity constraint dict (optional)
 # ---------------------------------------------------------------------------
-# A dict mapping each parameter group to "increase" or "decrease".
-# None → use the package DEFAULT_MONOTONICITY (shown below).
+# A dict mapping parameter groups to "increase", "decrease" or "none".
+# None → PHYSICAL_MONOTONICITY (below), also used when config.yaml omits the key.
 # {} (empty dict) → disable all monotonicity constraints.
+# Groups not listed in a dict are unconstrained ("none").
 #
-# DEFAULT_MONOTONICITY = {
-#     "sol_params_dn":      "none",   # no constraint
-#     "salt_params_dn":     "none",   # no constraint
-#     "params_sol_salt_an": "none",   # no constraint
-#     "params_sol_sol":     "none",   # no constraint
-#     "params_anion_anion": "none",   # no constraint
-#     "conc_factor_sol":    "none",   # no constraint
-# }
-#
-# Example — enforce physically motivated constraints on all terms:
-#   MONOTONICITY_DICT = {
-#       "sol_params_dn":      "decrease",
-#       "salt_params_dn":     "decrease",
-#       "params_sol_salt_an": "decrease",
-#       "params_sol_sol":     "decrease",
-#       "params_anion_anion": "increase",
-#       "conc_factor_sol":    "increase",
-#   }
-#
-# Example — enforce constraints on some terms only:
-#   MONOTONICITY_DICT = {**DEFAULT_MONOTONICITY, "sol_params_dn": "decrease"}
+# Example — constrain Li-solvent and Li-anion binding only:
+#   MONOTONICITY_DICT = {"sol_params_dn": "decrease", "salt_params_dn": "decrease"}
 #
 # Can also be set from config.yaml under the 'monotonicity_dict' key
 # (script-level value takes priority).
 MONOTONICITY_DICT = None
+
+# Physically motivated constraints from the paper; the default of this script.
+# Without constraints the root solver usually goes NaN within the first epoch.
+PHYSICAL_MONOTONICITY = {
+    "sol_params_dn":      "decrease",   # h(Li-solvent) decreases with DN
+    "salt_params_dn":     "decrease",   # h(Li-anion) decreases with anion DN
+    "params_sol_salt_an": "decrease",   # J(solvent-anion)
+    "params_sol_sol":     "decrease",   # J(solvent-solvent)
+    "params_anion_anion": "increase",   # J(anion-anion)
+    "conc_factor_sol":    "increase",   # concentration-volume correction
+}
 
 # ---------------------------------------------------------------------------
 # Coordination number — fixed for the standard DME/TTE/LiTFSI MD dataset
@@ -229,12 +224,26 @@ DEFAULTS = {
     "rescale_J_an_an":    None,
     "rescale_conc_factor": None,
     # Optional monotonicity constraint dict.
-    # None → use package DEFAULT_MONOTONICITY; {} → disable all constraints.
+    # None → PHYSICAL_MONOTONICITY; {} → disable all constraints.
     "monotonicity_dict": None,
     # Optional kwargs forwarded verbatim to initialize_params() each trial.
     # 'random_seed' is always computed per-trial and is silently ignored here.
     "initialize_params_kwargs": {},
 }
+
+
+def _check_monotonicity(mono):
+    """Validate a monotonicity dict and fill unlisted parameter groups with "none"."""
+    if not isinstance(mono, dict):
+        raise SystemExit(f"monotonicity_dict must be a mapping, got {mono!r}")
+    unknown = sorted(set(mono) - set(DEFAULT_MONOTONICITY))
+    if unknown:
+        raise SystemExit(f"monotonicity_dict: unknown parameter group(s) {unknown}; "
+                         f"valid groups are {sorted(DEFAULT_MONOTONICITY)}")
+    bad = {k: v for k, v in mono.items() if v not in ("increase", "decrease", "none")}
+    if bad:
+        raise SystemExit(f"monotonicity_dict: values must be 'increase', 'decrease' or 'none', got {bad}")
+    return {**DEFAULT_MONOTONICITY, **mono}
 
 
 def _load_config(argv):
@@ -305,8 +314,7 @@ def _load_config(argv):
     # Normalise initialize_params_kwargs: YAML may produce None for an empty mapping
     if not cfg.get("initialize_params_kwargs"):
         cfg["initialize_params_kwargs"] = {}
-    # monotonicity_dict: keep None as None (→ package default at call site);
-    # only normalise if the YAML produced an explicit empty-mapping marker.
+    # monotonicity_dict: keep None as None (→ PHYSICAL_MONOTONICITY at call site).
     # An explicit {} in YAML stays {} (meaning: disable all constraints).
     if "monotonicity_dict" not in cfg:
         cfg["monotonicity_dict"] = None
@@ -396,13 +404,14 @@ def main(argv=None):
 
     # -------------------------------------------------------------------
     # Resolve monotonicity dict
-    # Priority: script-level MONOTONICITY_DICT > YAML > package default
-    # None at any level → fall through to the next; final fallback is
-    # DEFAULT_MONOTONICITY (from IsingElectrolyte.model).
-    # {} means "disable all constraints" and is passed through as-is.
+    # Priority: script-level MONOTONICITY_DICT > YAML/CLI > PHYSICAL_MONOTONICITY
+    # None at any level → fall through to the next.
+    # {} means "disable all constraints"; unlisted groups are "none".
     # -------------------------------------------------------------------
     _mono_raw = MONOTONICITY_DICT if MONOTONICITY_DICT is not None else cfg["monotonicity_dict"]
-    monotonicity_dict = _mono_raw if _mono_raw is not None else DEFAULT_MONOTONICITY
+    monotonicity_dict = _check_monotonicity(
+        PHYSICAL_MONOTONICITY if _mono_raw is None else _mono_raw
+    )
 
     print("=== IsingElectrolyte Training ===")
     print(f"  train:    {cfg['train']}")
@@ -488,7 +497,10 @@ def main(argv=None):
         time_log.append(elapsed)
 
         final_val_loss = float(val_log[-1]) if len(val_log) > 0 else float("inf")
-        print(f"  Trial {trial + 1} finished in {elapsed:.1f}s — val_loss={final_val_loss:.4f}")
+        if np.isfinite(final_val_loss):
+            print(f"  Trial {trial + 1} finished in {elapsed:.1f}s — val_loss={final_val_loss:.4f}")
+        else:
+            print(f"  Trial {trial + 1} diverged after {elapsed:.1f}s (loss became NaN); discarded")
 
         if final_val_loss < best_val_loss:
             best_val_loss  = final_val_loss
@@ -501,6 +513,15 @@ def main(argv=None):
         if final_train_loss < 0.08 and final_val_loss < 0.08:
             print("  Losses below threshold — stopping early.")
             break
+
+    if best_params is None:
+        sys.exit(
+            f"\nERROR: all {len(time_log)} trial(s) diverged (the loss became NaN), so there are no "
+            "trained parameters and nothing was saved.\n"
+            f"  monotonicity_dict: {monotonicity_dict}\n"
+            "  Try the physically motivated constraints (the default when monotonicity_dict is not set),\n"
+            "  a lower --learning_rate, or more --trials / a different --seed."
+        )
 
     # ------------------------------------------------------------------
     # Save best parameters

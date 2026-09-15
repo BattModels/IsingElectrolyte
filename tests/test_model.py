@@ -49,6 +49,18 @@ def test_failed_solve_is_reported(paper_model, lhce):
     assert np.all(np.isnan(np.asarray(occ)))
 
 
+@pytest.mark.parametrize("mono", [{}, {"sol_params_dn": "decrease"}])
+def test_partial_monotonicity_dict_leaves_other_groups_unconstrained(lhce, mono):
+    """Groups missing from monotonicity_dict count as "none" (previously a KeyError)."""
+    params = initialize_params(random_seed=42)
+    none_for_rest = {k: "none" for k in params}
+    none_for_rest.update(mono)
+    occ, ok = find_root(params, *lhce, PAPER_Z, monotonicity_dict=mono)
+    occ_full, ok_full = find_root(params, *lhce, PAPER_Z, monotonicity_dict=none_for_rest)
+    assert bool(ok) == bool(ok_full)
+    np.testing.assert_array_equal(np.asarray(occ), np.asarray(occ_full))
+
+
 def test_li_free_energy_is_finite_and_negative(paper_model, lhce):
     params, kw = paper_model
     G = float(li_free_energy(params, *lhce, PAPER_Z, **kw))

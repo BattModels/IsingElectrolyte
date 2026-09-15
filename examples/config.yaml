@@ -47,13 +47,12 @@ lr_decay_rate:   0.95
 
 # --- Monotonicity constraints (optional) ---
 # Controls the sign of softplus-rescaled parameters.
-# Omit this section (or set to null) to use the package DEFAULT_MONOTONICITY
-# (currently all "none" — no constraints applied by default).
-# Set individual keys to "decrease", "increase", or "none".
-# Specify only the keys you want to override; unspecified keys are absent
-# from the dict (if you want full control, list all six).
+# Omit this section (or set to null) to use the physically motivated constraints
+# listed below; they are also train_lhce.py's default without a config file.
+# Training without constraints usually diverges in the first epoch.
+# Set individual keys to "decrease", "increase", or "none";
+# keys you do not list are unconstrained ("none").
 #
-# Allowed values per key: "increase" or "decrease"
 # Keys:
 #   sol_params_dn       h(Li-sol) field  (default: decrease with DN)
 #   salt_params_dn      h(Li-anion) field (default: decrease with DN)
@@ -62,10 +61,8 @@ lr_decay_rate:   0.95
 #   params_anion_anion  J(anion-anion)   (default: increase with DN)
 #   conc_factor_sol     concentration factor (default: increase with x, V)
 #
-# Example — use package defaults for everything:
-# monotonicity_dict: null
-#
-# Used here — the physically motivated constraints from the paper:
+# Used here, and also the default if this section is omitted —
+# the physically motivated constraints from the paper:
 monotonicity_dict:
   sol_params_dn:      decrease
   salt_params_dn:     decrease
@@ -83,7 +80,7 @@ monotonicity_dict:
 #   params_anion_anion: decrease
 #   conc_factor_sol:    increase
 #
-# Example — disable all monotonicity constraints:
+# Example — disable all monotonicity constraints (usually diverges):
 # monotonicity_dict: {}
 
 # --- Parameter initialization (optional) ---
