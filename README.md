@@ -283,7 +283,8 @@ inputs and targets, each row holds:
 
 ```bash
 pip install -e ".[dev]"
-pytest tests
+pytest -m "not slow"   # about a minute: install, predictions, gradients, short training, paper accuracy
+pytest                 # everything, adds a few minutes: every tutorial example and the training script
 ```
 
 ## Citation
