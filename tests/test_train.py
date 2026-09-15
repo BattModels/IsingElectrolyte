@@ -17,7 +17,8 @@ from conftest import DATA
 
 
 def load_split(path, rows):
-    df = pd.read_csv(path).head(rows)
+    df = pd.read_csv(path)
+    df = df if rows is None else df.head(rows)
     col = lambda c: jnp.array(df[c].to_numpy(dtype=float))
     pair = lambda a, b: jnp.stack([col(a), col(b)], axis=1)
     return {
@@ -53,6 +54,51 @@ def test_initialize_params_shapes():
 def test_initialize_params_is_reproducible():
     a, b = initialize_params(random_seed=7), initialize_params(random_seed=7)
     assert all(np.array_equal(a[k], b[k]) for k in a)
+
+
+def test_rescaled_start_values_match_hand_tuned(physical_monotonicity):
+    """The hard-coded unconstrained start is the hand-tuned start after the physical softplus."""
+    from IsingElectrolyte import interactions as I
+    from IsingElectrolyte.train import _HAND_TUNED_PARAMS, _HAND_TUNED_PARAMS_RESCALED
+
+    rescale = {"sol_params_dn": I.default_h_sol_rescale, "salt_params_dn": I.default_h_an_rescale,
+               "params_sol_salt_an": I.default_J_sol_an_rescale, "params_sol_sol": I.default_J_sol_sol_rescale,
+               "conc_factor_sol": I.default_conc_factor_rescale}
+    for key, fn in rescale.items():
+        expected = fn(_HAND_TUNED_PARAMS[key], physical_monotonicity[key])
+        np.testing.assert_allclose(np.asarray(_HAND_TUNED_PARAMS_RESCALED[key]), np.asarray(expected), rtol=1e-12, err_msg=key)
+
+
+def test_constrained_start_is_unchanged(physical_monotonicity):
+    """Passing the constraints you train with does not change the (raw) constrained start."""
+    for seed in (0, 42):
+        default, constrained = initialize_params(random_seed=seed), initialize_params(random_seed=seed, monotonicity_dict=physical_monotonicity)
+        assert all(np.array_equal(default[k], constrained[k]) for k in default)
+
+
+def test_start_is_chosen_per_group(physical_monotonicity):
+    raw = initialize_params(random_seed=3)
+    unconstrained = initialize_params(random_seed=3, monotonicity_dict={})
+    partial = initialize_params(random_seed=3, monotonicity_dict={"sol_params_dn": "decrease"})
+    np.testing.assert_array_equal(partial["sol_params_dn"], raw["sol_params_dn"])          # constrained group
+    np.testing.assert_array_equal(partial["salt_params_dn"], unconstrained["salt_params_dn"])  # unlisted → "none"
+    assert not np.allclose(unconstrained["salt_params_dn"], raw["salt_params_dn"])
+
+
+def test_unconstrained_start_is_solvable():
+    """Without constraints, the default start must give a valid root for every training formulation."""
+    import jax
+
+    from IsingElectrolyte.model import DEFAULT_MONOTONICITY, _find_root_impl, _freeze_mono
+
+    data = load_split(DATA / "fold_0" / "train.csv", rows=None)
+    mono = _freeze_mono(DEFAULT_MONOTONICITY)
+    for seed in (42, 112):  # seed 112 had 56 unsolvable formulations before the anion-anion start was rescaled
+        params = initialize_params(random_seed=seed, monotonicity_dict=DEFAULT_MONOTONICITY)
+        solve = jax.vmap(lambda a, b, x, v, d, xa, va: _find_root_impl(
+            params, a, b, x, v, d, xa, va, PAPER_Z, jnp.ones(3) / 3, max_tries=10, monotonicity_dict=mono))
+        _, ok = solve(data["dn_sol"], data["an_sol"], data["x_sol"], data["v_sol"], data["dn_an"], data["x_an"], data["v_an"])
+        assert bool(jnp.all(ok)), f"seed {seed}: {int((~ok).sum())} formulations without a valid root"
 
 
 def test_short_training_run(small_splits, physical_monotonicity):

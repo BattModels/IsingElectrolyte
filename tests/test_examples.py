@@ -71,9 +71,20 @@ def test_train_lhce_flags_only(tmp_path):
 
 
 @pytest.mark.slow
-def test_train_lhce_reports_when_all_trials_diverge(tmp_path):
-    """Without constraints training goes NaN; the script must say so, not crash, and not save a checkpoint."""
+def test_train_lhce_unconstrained(tmp_path):
+    """monotonicity_dict: {} starts from the rescaled hand-tuned values and trains."""
     config = write_config(tmp_path / "unconstrained.yaml", monotonicity_dict="{}", epochs=2, trials=1)
+    out = run_script("train_lhce.py", config, cwd=tmp_path)
+    assert "'sol_params_dn': 'none'" in out
+    assert "diverged" not in out
+    assert (tmp_path / "trained_params.pkl").exists()
+
+
+@pytest.mark.slow
+def test_train_lhce_reports_when_all_trials_diverge(tmp_path):
+    """A start that diverges (unconstrained, raw hand-tuned values forced): report it, no crash, no checkpoint."""
+    config = write_config(tmp_path / "raw_start.yaml", monotonicity_dict="{}", epochs=2, trials=1,
+                          initialize_params_kwargs="{mode: from_scratch, monotonicity_dict: null}")
     result = run_script("train_lhce.py", config, cwd=tmp_path, check=False)
     assert result.returncode != 0
     assert "all 1 trial(s) diverged" in result.stderr

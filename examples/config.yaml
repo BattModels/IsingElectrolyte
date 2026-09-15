@@ -49,9 +49,11 @@ lr_decay_rate:   0.95
 # Controls the sign of softplus-rescaled parameters.
 # Omit this section (or set to null) to use the physically motivated constraints
 # listed below; they are also train_lhce.py's default without a config file.
-# Training without constraints usually diverges in the first epoch.
 # Set individual keys to "decrease", "increase", or "none";
 # keys you do not list are unconstrained ("none").
+# Unconstrained groups start from the hand-tuned values as the constrained model
+# sees them (after the softplus), so training starts from the same physical model;
+# it can still diverge later, and diverged trials are discarded.
 #
 # Keys:
 #   sol_params_dn       h(Li-sol) field  (default: decrease with DN)
@@ -80,7 +82,7 @@ monotonicity_dict:
 #   params_anion_anion: decrease
 #   conc_factor_sol:    increase
 #
-# Example — disable all monotonicity constraints (usually diverges):
+# Example — disable all monotonicity constraints:
 # monotonicity_dict: {}
 
 # --- Parameter initialization (optional) ---
@@ -88,6 +90,8 @@ monotonicity_dict:
 # 'random_seed' is always computed per-trial and is ignored if set here.
 # If 'mode' is omitted, initialize_params() uses "from_file" when file_path is
 # given and "from_scratch" otherwise.
+# 'monotonicity_dict' defaults to the one above (picks the start for unconstrained
+# groups); set it to null to start every group from the raw hand-tuned values.
 #
 initialize_params_kwargs:
   mode: from_scratch

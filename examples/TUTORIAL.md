@@ -348,7 +348,12 @@ train_data, val_data, test_data = (load_split(f"{fold}/{s}.csv") for s in ("trai
 binding gets stronger (h decreases) with DN. Each parameter group takes `"decrease"`,
 `"increase"` or `"none"`; the constraint is enforced by passing the relevant parameters through
 a signed softplus, so the optimizer can never violate it. The package default is no
-constraints; these are the physically motivated ones:
+constraints (`examples/train_lhce.py` defaults to the physical ones below).
+
+The hand-tuned starting values from `initialize_params` are written for that softplus. To
+train a group *without* a constraint, pass the same `monotonicity_dict` to `initialize_params`:
+groups set to `"none"` then start from the values the constrained model would see, instead of
+raw values that describe an unphysical model. These are the physically motivated constraints:
 
 ```python
 monotonicity = {
