@@ -278,7 +278,7 @@ Rules of thumb:
 interacting with itself, so it is exact for a single salt. Mixed-salt systems need a model
 trained with the default anion–anion term (next section).
 
-The derivation and the measured magnitudes are in [`docs/asymmetry-fix.md`](../docs/asymmetry-fix.md).
+The exact symmetrization rule is documented in `IsingElectrolyte.model.symmetrize_pair_block`.
 
 ---
 

@@ -66,7 +66,7 @@ def _freeze_mono(d):
 # ---------------------------------------------------------------------------
 
 #: Default symmetrization mode for the J_ss / J_aa blocks.  See
-#: ``symmetrize_pair_block`` and ``docs/asymmetry-fix.md`` for the rationale.
+#: ``symmetrize_pair_block`` for the rationale.
 DEFAULT_PAIR_SYMMETRY = "group"
 
 

@@ -156,7 +156,7 @@ G = li_free_energy(params, solvents, anions, PAPER_Z, **model_kwargs)
 
 Note: accuracy is lower below ~0.5 m, likely because solvation there also depends on the dielectric constant, which the model does not include at the moment.
 
-See [`docs/asymmetry-fix.md`](docs/asymmetry-fix.md) for how `groups` works.
+See [section 4 of the tutorial](examples/TUTORIAL.md#4-more-than-two-solvents-or-one-salt) for how `groups` works.
 
 ---
 
@@ -258,7 +258,6 @@ examples/
 ├── TUTORIAL.md              # detailed guide to the package
 └── data/lhce_md/fold_{0..4}/{train,val,test}.csv
 
-docs/asymmetry-fix.md        # how multi-solvent pair interactions are symmetrized
 tests/                       # pytest suite
 ```
 

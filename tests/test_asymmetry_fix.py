@@ -1,6 +1,6 @@
-"""Regression tests for the group-aware J symmetrization (branch `asymmetry-fix`).
+"""Regression tests for the group-aware J symmetrization (``symmetrize_pair_block``).
 
-See ``docs/asymmetry-fix.md`` for the full rationale. In short: ``sol_sol_func``
+In short: ``sol_sol_func``
 is asymmetric in its two inputs, so the generic ``default_J_sol_sol`` produced a
 non-symmetric J block. These tests pin down the three properties the fix must
 have:
